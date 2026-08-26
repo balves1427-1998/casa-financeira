@@ -189,6 +189,23 @@ são lidos apenas para extrair os lançamentos.
 
 ---
 
+## Deploy
+
+Backend no **Render** ou **Railway**, frontend na **Vercel**.
+Passo a passo, variáveis de ambiente e verificação pós-deploy em
+**[`docs/DEPLOY.md`](docs/DEPLOY.md)**.
+
+Os arquivos de configuração já estão no repositório: `render.yaml` (blueprint
+completo com API, PostgreSQL e Redis), `backend/railway.json` e
+`frontend/vercel.json`.
+
+Health check da API: `GET /health` e `GET /health/ready`.
+
+> O Lovable trabalha com React + Vite e Supabase — a API NestJS não roda nele.
+> Ver a seção "Sobre o Lovable" em `docs/DEPLOY.md`.
+
+---
+
 ## Licença
 
 Projeto pessoal de uso privado.

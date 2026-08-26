@@ -5,10 +5,15 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  env: {
-    NEXT_PUBLIC_API_URL: process.env.API_URL || 'http://localhost:3000',
-    NEXT_PUBLIC_APP_NAME: 'Casa Financeira',
-  },
+  // Não declare `NEXT_PUBLIC_*` aqui.
+  //
+  // O bloco `env` do Next tem precedência sobre as variáveis do ambiente, então
+  // `NEXT_PUBLIC_API_URL: process.env.API_URL || 'http://localhost:3000'`
+  // descartava o valor configurado na Vercel e o build de produção acabava
+  // apontando para localhost — falha silenciosa, difícil de diagnosticar.
+  //
+  // Variáveis com o prefixo `NEXT_PUBLIC_` já são expostas ao navegador
+  // automaticamente; basta defini-las no painel da hospedagem ou no `.env.local`.
   headers: async () => {
     return [
       {

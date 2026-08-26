@@ -13,18 +13,31 @@ import { DataSource } from 'typeorm';
 loadEnv({ path: '.env.development' });
 loadEnv({ path: '.env' });
 
-const AppDataSource = new DataSource({
-  type: 'postgres',
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432', 10),
-  username: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
+/**
+ * Em produção, os serviços gerenciados entregam uma única `DATABASE_URL` e
+ * exigem TLS. A configuração precisa cobrir os dois formatos, senão o comando
+ * de migration falha no deploy — justamente quando ele é mais necessário.
+ */
+const base = {
+  type: 'postgres' as const,
   entities: [`${__dirname}/../**/entities/*.entity{.ts,.js}`],
   migrations: [`${__dirname}/migrations/*{.ts,.js}`],
   migrationsTableName: 'migrations',
   synchronize: false,
   logging: process.env.NODE_ENV === 'development',
-});
+  ssl:
+    process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
+};
+
+const AppDataSource = process.env.DATABASE_URL
+  ? new DataSource({ ...base, url: process.env.DATABASE_URL })
+  : new DataSource({
+      ...base,
+      host: process.env.DB_HOST || 'localhost',
+      port: parseInt(process.env.DB_PORT || '5432', 10),
+      username: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME,
+    });
 
 export default AppDataSource;

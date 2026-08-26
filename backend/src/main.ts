@@ -11,11 +11,22 @@ async function bootstrap() {
   app.use(helmet());
 
   // CORS
+  //
+  // `FRONTEND_URL` aceita uma lista separada por vírgula: em produção é comum
+  // precisar liberar o domínio final e as URLs de preview da Vercel ao mesmo
+  // tempo. `exposedHeaders` é obrigatório para o download de relatórios — sem
+  // ele o navegador esconde o `Content-Disposition` e o arquivo baixa sem nome.
+  const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3001')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3001',
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['Content-Disposition'],
   });
 
   // Validation
@@ -50,9 +61,15 @@ async function bootstrap() {
   //   });
   // }
 
-  const port = process.env.API_PORT || 3000;
-  await app.listen(port);
-  console.log(`🚀 API running on http://localhost:${port}`);
+  // As plataformas de hospedagem (Railway, Render, Fly, Heroku) injetam `PORT`
+  // e roteiam o tráfego para ela. Ignorar essa variável faz o deploy falhar no
+  // health check, mesmo com a aplicação no ar.
+  const port = process.env.PORT || process.env.API_PORT || 3000;
+
+  // `0.0.0.0` é necessário dentro de contêiner: em `localhost` o processo só
+  // aceitaria conexões de dentro do próprio contêiner.
+  await app.listen(port, '0.0.0.0');
+  console.log(`🚀 API running on port ${port}`);
 }
 
 bootstrap().catch((error) => {

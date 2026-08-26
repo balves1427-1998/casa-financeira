@@ -25,6 +25,7 @@ import { MLClassifierModule } from './modules/ml-classifier/ml-classifier.module
 import { AiModule } from './modules/ai/ai.module';
 import { GoalsModule } from './modules/goals/goals.module';
 import { SplitModule } from './modules/split/split.module';
+import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
@@ -35,38 +36,71 @@ import { SplitModule } from './modules/split/split.module';
     }),
 
     // Database
+    //
+    // Serviços gerenciados (Railway, Render, Heroku, Neon, Supabase) entregam
+    // UMA `DATABASE_URL` em vez de host/porta/usuário separados, e quase sempre
+    // exigem TLS. Sem tratar os dois casos, o deploy falha na conexão.
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        type: 'postgres',
-        host: config.get('DB_HOST'),
-        port: config.get('DB_PORT'),
-        username: config.get('DB_USER'),
-        password: config.get('DB_PASSWORD'),
-        database: config.get('DB_NAME'),
-        entities: [`${__dirname}/**/entities/*.entity{.ts,.js}`],
-        migrations: [`${__dirname}/database/migrations/*{.ts,.js}`],
-        synchronize: false,
-        logging: process.env.NODE_ENV === 'development',
-        migrationsRun: false,
-      }),
+      useFactory: (config: ConfigService) => {
+        const url = config.get<string>('DATABASE_URL');
+
+        const base = {
+          type: 'postgres' as const,
+          entities: [`${__dirname}/**/entities/*.entity{.ts,.js}`],
+          migrations: [`${__dirname}/database/migrations/*{.ts,.js}`],
+          synchronize: false,
+          logging: config.get('NODE_ENV') === 'development',
+          migrationsRun: false,
+          // O certificado dos bancos gerenciados costuma ser assinado por uma
+          // CA que o Node não conhece; `rejectUnauthorized: false` mantém a
+          // conexão criptografada sem exigir a cadeia completa.
+          ssl:
+            config.get('DB_SSL') === 'true'
+              ? { rejectUnauthorized: false }
+              : false,
+        };
+
+        return url
+          ? { ...base, url }
+          : {
+              ...base,
+              host: config.get<string>('DB_HOST'),
+              port: parseInt(config.get<string>('DB_PORT') || '5432', 10),
+              username: config.get<string>('DB_USER'),
+              password: config.get<string>('DB_PASSWORD'),
+              database: config.get<string>('DB_NAME'),
+            };
+      },
     }),
 
     // Redis / Queue
+    //
+    // Mesma lógica: em produção normalmente chega `REDIS_URL`.
     BullModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        redis: {
-          host: config.get('REDIS_HOST'),
-          port: config.get('REDIS_PORT'),
-        },
-      }),
+      useFactory: (config: ConfigService) => {
+        const url = config.get<string>('REDIS_URL');
+
+        if (url) {
+          return { url };
+        }
+
+        return {
+          redis: {
+            host: config.get<string>('REDIS_HOST') || 'localhost',
+            port: parseInt(config.get<string>('REDIS_PORT') || '6379', 10),
+          },
+        };
+      },
     }),
 
     // Scheduling
     ScheduleModule.forRoot(),
 
     // Feature Modules
+    // Health check — precisa estar disponível para a plataforma de deploy
+    HealthModule,
     AuthModule,
     UsersModule,
     FamiliesModule,

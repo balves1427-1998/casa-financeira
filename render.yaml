@@ -1,0 +1,82 @@
+# Blueprint do Render — sobe a API, o PostgreSQL e o Redis de uma vez.
+#
+# Como usar:
+#   1. Render Dashboard → New → Blueprint
+#   2. Aponte para este repositório
+#   3. Preencha FRONTEND_URL depois que o frontend estiver na Vercel
+#
+# O `JWT_SECRET` é gerado automaticamente pelo Render (generateValue) — não
+# existe segredo neste arquivo.
+
+databases:
+  - name: casa-financeira-db
+    databaseName: casa_financeira
+    user: casa_financeira
+    plan: free
+    postgresMajorVersion: '16'
+
+services:
+  # ==================== API ====================
+  - type: web
+    name: casa-financeira-api
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: npm ci && npm run build
+    # As migrations rodam ANTES de subir a aplicação: um deploy com o código
+    # novo e o schema antigo quebra em runtime, não no build.
+    startCommand: npm run deploy:start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # O Render injeta PORT automaticamente; main.ts já a respeita.
+
+      - key: DATABASE_URL
+        fromDatabase:
+          name: casa-financeira-db
+          property: connectionString
+
+      # O PostgreSQL gerenciado do Render exige TLS.
+      - key: DB_SSL
+        value: 'true'
+
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: casa-financeira-redis
+          property: connectionString
+
+      - key: JWT_SECRET
+        generateValue: true
+
+      - key: JWT_EXPIRATION
+        value: 7d
+
+      # Preencha com a URL da Vercel após o deploy do frontend.
+      # Aceita lista separada por vírgula (útil para as URLs de preview).
+      - key: FRONTEND_URL
+        sync: false
+
+      # SMTP — opcional. Sem estas variáveis os alertas por e-mail ficam
+      # desativados, mas o restante do sistema funciona normalmente.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+
+  # ==================== Redis (filas do Bull) ====================
+  - type: redis
+    name: casa-financeira-redis
+    plan: free
+    region: oregon
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
