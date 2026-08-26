@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { font-family: Arial, sans-serif; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #27ae60; color: white; padding: 20px; border-radius: 5px; text-align: center; }
+        .content { padding: 20px; border: 1px solid #ddd; margin-top: 20px; }
+        .footer { text-align: center; padding: 20px; color: #999; font-size: 12px; }
+        .success-box { background-color: #d5f4e6; border-left: 4px solid #27ae60; padding: 15px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>✅ Email de Teste</h1>
+        </div>
+
+        <div class="content">
+            <div class="success-box">
+                <h2>Seu email foi configurado com sucesso!</h2>
+                <p>Este é um email de teste para verificar se a configuração de notificações está funcionando corretamente.</p>
+            </div>
+
+            <p>Olá <strong>{{userName}}</strong>,</p>
+
+            <p>Você receberá emails sobre:</p>
+            <ul>
+                {{#if reportEmails}}<li>📊 Relatórios agendados</li>{{/if}}
+                {{#if alertEmails}}<li>🔔 Alertas de finanças</li>{{/if}}
+                {{#if weeklyEmails}}<li>📈 Resumo semanal</li>{{/if}}
+            </ul>
+
+            <p>Se você não deseja receber mais emails, pode atualizar suas preferências a qualquer momento.</p>
+
+            <p style="margin-top: 30px; text-align: center;">
+                <a href="{{preferencesLink}}" style="display: inline-block; background-color: #27ae60; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Gerenciar Preferências</a>
+            </p>
+        </div>
+
+        <div class="footer">
+            <p>Casa Financeira - Seu controle financeiro automático</p>
+            <p><a href="{{unsubscribeLink}}">Cancelar inscrição</a></p>
+        </div>
+    </div>
+</body>
+</html>

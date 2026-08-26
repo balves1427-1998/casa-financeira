@@ -1,0 +1,402 @@
+{
+  "client": "insomnia",
+  "clientVersion": "2024.1.0",
+  "version": 1,
+  "collections": [
+    {
+      "_id": "col_casa_financeira_ai",
+      "parentId": null,
+      "modified": 1693008000,
+      "created": 1693008000,
+      "name": "Casa Financeira - AI Intelligence (Seção B)",
+      "description": "API de Inteligência Financeira Avançada",
+      "environment": {
+        "base_url": "http://localhost:3000/api/v1",
+        "jwt_token": "seu_jwt_token_aqui",
+        "family_id": "family-123"
+      },
+      "folders": [
+        {
+          "_id": "fol_chat",
+          "name": "1️⃣ AI Chat (5 endpoints)",
+          "requests": [
+            {
+              "_id": "req_chat_send",
+              "name": "POST - Enviar mensagem",
+              "url": "{{ base_url }}/families/{{ family_id }}/ai/chat",
+              "method": "POST",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}",
+                "Content-Type": "application/json"
+              },
+              "body": {
+                "mode": "raw",
+                "raw": "{\n  \"question\": \"Quanto gastei com alimentação este mês?\"\n}"
+              },
+              "description": "Envia pergunta para o AI Assistant"
+            },
+            {
+              "_id": "req_chat_history",
+              "name": "GET - Histórico de chat",
+              "url": "{{ base_url }}/families/{{ family_id }}/ai/chat/history?limit=10&offset=0",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Retorna histórico de mensagens com paginação"
+            },
+            {
+              "_id": "req_chat_suggestions",
+              "name": "GET - Sugestões de perguntas",
+              "url": "{{ base_url }}/families/{{ family_id }}/ai/chat/suggestions",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Gera sugestões de perguntas baseadas no contexto"
+            },
+            {
+              "_id": "req_chat_delete",
+              "name": "DELETE - Deletar mensagem",
+              "url": "{{ base_url }}/families/{{ family_id }}/ai/chat/history/msg-uuid-aqui",
+              "method": "DELETE",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Soft delete de uma mensagem específica"
+            },
+            {
+              "_id": "req_chat_clear",
+              "name": "POST - Limpar histórico",
+              "url": "{{ base_url }}/families/{{ family_id }}/ai/chat/clear-history",
+              "method": "POST",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Limpa todo o histórico de chat"
+            }
+          ]
+        },
+        {
+          "_id": "fol_recommendations",
+          "name": "2️⃣ Recomendações (7 endpoints)",
+          "requests": [
+            {
+              "_id": "req_rec_list",
+              "name": "GET - Listar recomendações",
+              "url": "{{ base_url }}/families/{{ family_id }}/recommendations?priority=HIGH&limit=10&offset=0",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Lista recomendações com filtros opcionais"
+            },
+            {
+              "_id": "req_rec_high",
+              "name": "GET - Alta prioridade",
+              "url": "{{ base_url }}/families/{{ family_id }}/recommendations/high-priority?limit=10",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Retorna apenas recomendações com alta prioridade"
+            },
+            {
+              "_id": "req_rec_detail",
+              "name": "GET - Detalhes de uma recomendação",
+              "url": "{{ base_url }}/families/{{ family_id }}/recommendations/rec-uuid-aqui",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Retorna detalhes completos de uma recomendação"
+            },
+            {
+              "_id": "req_rec_update",
+              "name": "PATCH - Atualizar recomendação",
+              "url": "{{ base_url }}/families/{{ family_id }}/recommendations/rec-uuid-aqui",
+              "method": "PATCH",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}",
+                "Content-Type": "application/json"
+              },
+              "body": {
+                "mode": "raw",
+                "raw": "{\n  \"isDismissed\": true\n}"
+              },
+              "description": "Marca recomendação como descartada"
+            },
+            {
+              "_id": "req_rec_impact",
+              "name": "GET - Impacto estimado",
+              "url": "{{ base_url }}/families/{{ family_id }}/recommendations/impact-estimate",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Estima impacto total de seguir todas as recomendações"
+            },
+            {
+              "_id": "req_rec_apply",
+              "name": "POST - Aplicar recomendação",
+              "url": "{{ base_url }}/families/{{ family_id }}/recommendations/rec-uuid-aqui/apply",
+              "method": "POST",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}",
+                "Content-Type": "application/json"
+              },
+              "body": {
+                "mode": "raw",
+                "raw": "{\n  \"action\": \"confirmed\"\n}"
+              },
+              "description": "Marca recomendação como aplicada"
+            },
+            {
+              "_id": "req_rec_regenerate",
+              "name": "POST - Regenerar recomendações",
+              "url": "{{ base_url }}/families/{{ family_id }}/recommendations/regenerate",
+              "method": "POST",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Força regeneração de recomendações antigas"
+            }
+          ]
+        },
+        {
+          "_id": "fol_analysis",
+          "name": "3️⃣ Análise Comportamental (5 endpoints)",
+          "requests": [
+            {
+              "_id": "req_ana_behavior",
+              "name": "GET - Análise comportamental",
+              "url": "{{ base_url }}/families/{{ family_id }}/analysis/behavior?period=LAST_6_MONTHS",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Análise completa de padrões de gasto"
+            },
+            {
+              "_id": "req_ana_patterns",
+              "name": "GET - Detectar padrões",
+              "url": "{{ base_url }}/families/{{ family_id }}/analysis/patterns?frequency=weekly&limit=20",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Identifica padrões recorrentes de gasto"
+            },
+            {
+              "_id": "req_ana_correlations",
+              "name": "GET - Correlações",
+              "url": "{{ base_url }}/families/{{ family_id }}/analysis/correlations?minCorrelation=0.5&limit=20",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Analisa correlações entre variáveis financeiras"
+            },
+            {
+              "_id": "req_ana_profile",
+              "name": "GET - Perfil de gasto",
+              "url": "{{ base_url }}/families/{{ family_id }}/analysis/spending-profile?period=LAST_12_MONTHS",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Retorna perfil de gasto do usuário/família"
+            },
+            {
+              "_id": "req_ana_insights",
+              "name": "GET - Insights automáticos",
+              "url": "{{ base_url }}/families/{{ family_id }}/analysis/insights",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Gera insights automáticos baseados em análise"
+            }
+          ]
+        },
+        {
+          "_id": "fol_anomalies",
+          "name": "4️⃣ Detecção de Anomalias (3 endpoints)",
+          "requests": [
+            {
+              "_id": "req_anom_list",
+              "name": "GET - Listar anomalias",
+              "url": "{{ base_url }}/families/{{ family_id }}/analysis/anomalies?severity=HIGH&limit=50&offset=0",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Lista anomalias detectadas com filtros"
+            },
+            {
+              "_id": "req_anom_detail",
+              "name": "GET - Detalhes de anomalia",
+              "url": "{{ base_url }}/families/{{ family_id }}/analysis/anomalies/anom-uuid-aqui",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Retorna detalhes completos de uma anomalia"
+            },
+            {
+              "_id": "req_anom_confirm",
+              "name": "PATCH - Confirmar anomalia",
+              "url": "{{ base_url }}/families/{{ family_id }}/analysis/anomalies/anom-uuid-aqui/confirm",
+              "method": "PATCH",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}",
+                "Content-Type": "application/json"
+              },
+              "body": {
+                "mode": "raw",
+                "raw": "{\n  \"status\": \"NORMAL\",\n  \"notes\": \"Transação legítima\"\n}"
+              },
+              "description": "Confirma se anomalia é legítima ou fraudulenta"
+            }
+          ]
+        },
+        {
+          "_id": "fol_forecasts",
+          "name": "5️⃣ Previsões Financeiras (11 endpoints)",
+          "requests": [
+            {
+              "_id": "req_for_30",
+              "name": "GET - Previsão 30 dias",
+              "url": "{{ base_url }}/families/{{ family_id }}/forecasts/next-30-days",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Previsão de gastos para próximos 30 dias"
+            },
+            {
+              "_id": "req_for_90",
+              "name": "GET - Previsão 90 dias",
+              "url": "{{ base_url }}/families/{{ family_id }}/forecasts/next-90-days",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Previsão de gastos para próximos 90 dias"
+            },
+            {
+              "_id": "req_for_180",
+              "name": "GET - Previsão 180 dias",
+              "url": "{{ base_url }}/families/{{ family_id }}/forecasts/next-180-days",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Previsão de gastos para próximos 180 dias"
+            },
+            {
+              "_id": "req_for_365",
+              "name": "GET - Previsão 1 ano",
+              "url": "{{ base_url }}/families/{{ family_id }}/forecasts/next-365-days",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Previsão de gastos para próximo ano"
+            },
+            {
+              "_id": "req_for_category",
+              "name": "GET - Por categoria",
+              "url": "{{ base_url }}/families/{{ family_id }}/forecasts/by-category?period=90_DAYS&limit=20",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Previsões desagregadas por categoria"
+            },
+            {
+              "_id": "req_for_scenarios",
+              "name": "GET - Cenários (best/worst)",
+              "url": "{{ base_url }}/families/{{ family_id }}/forecasts/scenarios?period=90_DAYS",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Análise de cenários (otimista/esperado/pessimista)"
+            },
+            {
+              "_id": "req_for_balance",
+              "name": "GET - Projeção de saldo",
+              "url": "{{ base_url }}/families/{{ family_id }}/forecasts/balance-projection?period=90_DAYS",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Projeção do saldo ao longo dos dias"
+            },
+            {
+              "_id": "req_for_specific",
+              "name": "GET - Categoria específica",
+              "url": "{{ base_url }}/families/{{ family_id }}/forecasts/cat-uuid-aqui?period=90_DAYS",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Previsão para uma categoria específica"
+            },
+            {
+              "_id": "req_for_details",
+              "name": "GET - Detalhes da previsão",
+              "url": "{{ base_url }}/families/{{ family_id }}/forecasts/details?period=90_DAYS",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Detalhes e metadados da previsão"
+            },
+            {
+              "_id": "req_for_accuracy",
+              "name": "GET - Comparar com real",
+              "url": "{{ base_url }}/families/{{ family_id }}/forecasts/accuracy-comparison?limit=12",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Compara previsões anteriores com valores reais"
+            },
+            {
+              "_id": "req_for_regenerate",
+              "name": "GET - Regenerar previsões",
+              "url": "{{ base_url }}/families/{{ family_id }}/forecasts/regenerate",
+              "method": "GET",
+              "headers": {
+                "Authorization": "Bearer {{ jwt_token }}"
+              },
+              "description": "Força regeneração de previsões antigas"
+            }
+          ]
+        }
+      ],
+      "environments": [
+        {
+          "name": "Local Development",
+          "base_url": "http://localhost:3000/api/v1",
+          "jwt_token": "seu_jwt_token_aqui",
+          "family_id": "family-123"
+        },
+        {
+          "name": "Staging",
+          "base_url": "https://api-staging.casafinanceira.com/api/v1",
+          "jwt_token": "token_staging_aqui",
+          "family_id": "family-123"
+        },
+        {
+          "name": "Production",
+          "base_url": "https://api.casafinanceira.com/api/v1",
+          "jwt_token": "token_production_aqui",
+          "family_id": "family-123"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+# Dependências
+node_modules/
+
+# Build
+dist/
+*.tsbuildinfo
+
+# Variáveis de ambiente
+.env
+.env.local
+.env.*.local
+
+# Arquivos gerados pelo módulo de relatórios (PDF/XLSX/CSV em disco)
+storage/
+
+# Logs e cobertura
+logs/
+*.log
+coverage/
+
+# Sistema operacional / editor
+.DS_Store
+.idea/
+.vscode/

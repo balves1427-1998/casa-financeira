@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { font-family: Arial, sans-serif; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { padding: 20px; border-radius: 5px; color: white; }
+        .critical { background-color: #e74c3c; }
+        .warning { background-color: #f39c12; }
+        .info { background-color: #3498db; }
+        .content { padding: 20px; border: 1px solid #ddd; margin-top: 20px; }
+        .footer { text-align: center; padding: 20px; color: #999; font-size: 12px; }
+        .button { display: inline-block; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 10px 0; }
+        .critical .button { background-color: #e74c3c; }
+        .warning .button { background-color: #f39c12; }
+        .info .button { background-color: #3498db; }
+        .alert-box { padding: 15px; margin: 20px 0; border-left: 4px solid; }
+        .alert-critical { border-color: #e74c3c; background-color: #fadbd8; }
+        .alert-warning { border-color: #f39c12; background-color: #fef5e7; }
+        .alert-info { border-color: #3498db; background-color: #d6eaf8; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header {{severity}}">
+            <h1>🔔 {{title}}</h1>
+            <p>Severidade: <strong>{{severityLabel}}</strong></p>
+        </div>
+
+        <div class="content">
+            <p>Olá {{userName}},</p>
+
+            <div class="alert-box alert-{{severity}}">
+                <h2>{{title}}</h2>
+                <p>{{message}}</p>
+            </div>
+
+            {{#if data.accountName}}
+            <div style="background-color: #ecf0f1; padding: 15px; margin: 10px 0; border-radius: 5px;">
+                <p><strong>Conta:</strong> {{data.accountName}}</p>
+                {{#if data.dueDate}}
+                <p><strong>Data de Vencimento:</strong> {{data.dueDate}}</p>
+                {{/if}}
+                {{#if data.amount}}
+                <p><strong>Valor:</strong> R$ {{data.amount}}</p>
+                {{/if}}
+                {{#if data.daysUntilDue}}
+                <p><strong>Dias até vencimento:</strong> {{data.daysUntilDue}}</p>
+                {{/if}}
+            </div>
+            {{/if}}
+
+            {{#if data.creditCardName}}
+            <div style="background-color: #ecf0f1; padding: 15px; margin: 10px 0; border-radius: 5px;">
+                <p><strong>Cartão:</strong> {{data.creditCardName}}</p>
+                {{#if data.percentageUsed}}
+                <p><strong>Limite Utilizado:</strong> {{data.percentageUsed}}%</p>
+                <div style="width: 100%; background-color: #ddd; border-radius: 5px; overflow: hidden; height: 20px;">
+                    <div style="width: {{data.percentageUsed}}%; background-color: {{#if data.percentageUsed gte 90}}#e74c3c{{else}}#f39c12{{/if}}; height: 100%;"></div>
+                </div>
+                {{/if}}
+            </div>
+            {{/if}}
+
+            {{#if data.currentBalance}}
+            <div style="background-color: #ecf0f1; padding: 15px; margin: 10px 0; border-radius: 5px;">
+                <p><strong>Saldo Atual:</strong> R$ {{data.currentBalance}}</p>
+                {{#if data.minimumBalance}}
+                <p><strong>Saldo Mínimo Configurado:</strong> R$ {{data.minimumBalance}}</p>
+                {{/if}}
+            </div>
+            {{/if}}
+
+            {{#if data.category}}
+            <div style="background-color: #ecf0f1; padding: 15px; margin: 10px 0; border-radius: 5px;">
+                <p><strong>Categoria:</strong> {{data.category}}</p>
+                {{#if data.percentageIncrease}}
+                <p><strong>Aumento:</strong> {{data.percentageIncrease}}% acima da média</p>
+                {{/if}}
+                {{#if data.currentAmount}}
+                <p><strong>Gasto Atual:</strong> R$ {{data.currentAmount}}</p>
+                {{/if}}
+            </div>
+            {{/if}}
+
+            <p style="margin-top: 30px; text-align: center;">
+                <a href="{{actionLink}}" class="button">Ver Detalhes</a>
+            </p>
+
+            <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
+
+            <p style="font-size: 12px; color: #999;">
+                Esta é uma notificação automática do Casa Financeira.
+                {{#if allowDismiss}}<a href="{{dismissLink}}">Descartar este alerta</a>{{/if}}
+            </p>
+        </div>
+
+        <div class="footer">
+            <p>Casa Financeira - Seu controle financeiro automático</p>
+            <p><a href="{{unsubscribeLink}}">Cancelar inscrição neste tipo de alerta</a></p>
+        </div>
+    </div>
+</body>
+</html>

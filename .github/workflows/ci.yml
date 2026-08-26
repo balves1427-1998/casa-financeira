@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend — tipos, testes e migrations
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: casa_financeira
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: admin_dev_password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U admin -d casa_financeira"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Verificar tipos
+        run: npx tsc --noEmit
+
+      - name: Testes
+        run: npm test
+
+      # As migrations precisam aplicar do zero: uma cadeia quebrada impede
+      # qualquer ambiente novo de subir.
+      - name: Aplicar migrations do zero
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: casa_financeira
+          DB_USER: admin
+          DB_PASSWORD: admin_dev_password
+          NODE_ENV: test
+        run: |
+          PGPASSWORD=admin_dev_password psql -h localhost -U admin -d casa_financeira \
+            -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'
+          npm run db:run-migrations
+
+      - name: Build
+        run: npm run build
+
+  frontend:
+    name: Frontend — tipos e build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Verificar tipos
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build

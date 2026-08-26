@@ -1,0 +1,336 @@
+import { Injectable, BadRequestException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, Between } from 'typeorm';
+import { CashFlowSnapshot } from '../entities/cash-flow-snapshot.entity';
+import { User } from '../../../modules/users/entities/user.entity';
+import { Expense } from '../../../modules/expenses/entities/expense.entity';
+import { Income } from '../../../modules/income/entities/income.entity';
+import { PlannedAccount } from '../../../modules/planned-accounts/entities/planned-account.entity';
+import { CreditCard } from '../../../modules/credit-cards/entities/credit-card.entity';
+import { Account } from '../../../modules/accounts/entities/account.entity';
+import {
+  CashFlowDayDto,
+  CashFlowMonthDto,
+  BestDayToShopDto,
+  GetCashFlowAnalysisDto,
+  GetBestDayToShopDto,
+  CashFlowSummaryDto,
+} from '../dtos/cash-flow.dto';
+
+@Injectable()
+export class CashFlowService {
+  constructor(
+    @InjectRepository(CashFlowSnapshot)
+    private snapshotRepository: Repository<CashFlowSnapshot>,
+    @InjectRepository(Expense)
+    private expenseRepository: Repository<Expense>,
+    @InjectRepository(Income)
+    private incomeRepository: Repository<Income>,
+    @InjectRepository(PlannedAccount)
+    private plannedAccountRepository: Repository<PlannedAccount>,
+    @InjectRepository(CreditCard)
+    private creditCardRepository: Repository<CreditCard>,
+    @InjectRepository(Account)
+    private accountRepository: Repository<Account>,
+  ) {}
+
+  /**
+   * Get cash flow for a specific month
+   */
+  async getMonthCashFlow(user: User, month: number, year: number): Promise<CashFlowMonthDto> {
+    // Validate month/year
+    if (month < 1 || month > 12 || year < 2000 || year > 2100) {
+      throw new BadRequestException('Invalid month or year');
+    }
+
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0);
+
+    // Get all transactions for the month
+    const expenses = await this.expenseRepository.find({
+      where: {
+        userId: user.id,
+        date: Between(startDate, endDate),
+      },
+    });
+
+    const incomes = await this.incomeRepository.find({
+      where: {
+        userId: user.id,
+        date: Between(startDate, endDate),
+      },
+    });
+
+    const plannedAccounts = await this.plannedAccountRepository.find({
+      where: {
+        userId: user.id,
+        dueDate: Between(startDate, endDate),
+      },
+    });
+
+    // Calculate opening balance (from previous month end or default)
+    const openingBalance = await this.getOpeningBalance(user, startDate);
+
+    // Build daily snapshots
+    const days: CashFlowDayDto[] = [];
+    let runningBalance = openingBalance;
+    const criticalDays = [];
+
+    for (let day = 1; day <= endDate.getDate(); day++) {
+      const currentDate = new Date(year, month - 1, day);
+
+      // Get transactions for this day
+      const dayExpenses = expenses.filter(
+        e => e.date.getDate() === day,
+      );
+      const dayIncomes = incomes.filter(
+        i => i.date.getDate() === day,
+      );
+      const dayPlanned = plannedAccounts.filter(
+        p => p.dueDate.getDate() === day,
+      );
+
+      // Colunas `decimal` voltam do PostgreSQL como string: sem Number() o
+      // `+` concatenava os valores ("0" + "55.90" = "055.90") e todo o fluxo
+      // de caixa saía como texto, com avgDailyExpenses = NaN.
+      const dailyIncome = dayIncomes.reduce(
+        (sum, i) => sum + Number(i.amount),
+        0,
+      );
+      const dailyExpenses = dayExpenses.reduce(
+        (sum, e) => sum + Number(e.amount),
+        0,
+      );
+      const plannedAmount = dayPlanned.reduce(
+        (sum, p) => sum + Number(p.amount),
+        0,
+      );
+
+      const closingBalance = runningBalance + dailyIncome - dailyExpenses;
+      const projectedBalance = closingBalance - plannedAmount;
+
+      // Check if critical day
+      const totalPayments = dailyExpenses + plannedAmount;
+      const isCriticalDay = totalPayments > openingBalance * 0.15; // 15% of opening balance
+
+      const daySnapshot: CashFlowDayDto = {
+        date: currentDate,
+        openingBalance: runningBalance,
+        dailyIncome,
+        dailyExpenses,
+        plannedAccountsAmount: plannedAmount,
+        closingBalance,
+        projectedBalance,
+        transactionCount: dayExpenses.length + dayIncomes.length + dayPlanned.length,
+        isCriticalDay,
+        criticalDayReason: isCriticalDay
+          ? `R$ ${totalPayments.toFixed(2)} em pagamentos`
+          : undefined,
+      };
+
+      days.push(daySnapshot);
+
+      if (isCriticalDay) {
+        criticalDays.push({
+          date: currentDate,
+          reason: `R$ ${totalPayments.toFixed(2)} em pagamentos`,
+          totalPayments,
+        });
+      }
+
+      runningBalance = closingBalance;
+    }
+
+    // Calculate totals
+    const totalIncome = incomes.reduce((sum, i) => sum + Number(i.amount), 0);
+    const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+    const totalPlanned = plannedAccounts.reduce(
+      (sum, p) => sum + Number(p.amount),
+      0,
+    );
+    const avgDailyExpenses = totalExpenses / endDate.getDate();
+
+    return {
+      month,
+      year,
+      days,
+      openingBalance,
+      totalIncome,
+      totalExpenses,
+      closingBalance: runningBalance,
+      avgDailyExpenses,
+      criticalDays,
+    };
+  }
+
+  /**
+   * Get best day to make a purchase
+   */
+  async getBestDayToShop(
+    user: User,
+    dto: GetBestDayToShopDto,
+  ): Promise<BestDayToShopDto> {
+    if (dto.desiredAmount <= 0) {
+      throw new BadRequestException('Desired amount must be greater than 0');
+    }
+
+    const startDate = dto.startDate || new Date();
+    const endDate = dto.endDate || new Date(startDate.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days ahead
+    const minBalance = dto.minimumBalanceThreshold || 2000;
+
+    // Get cash flow for the period
+    const monthCashFlow = await this.getMonthCashFlow(
+      user,
+      startDate.getMonth() + 1,
+      startDate.getFullYear(),
+    );
+
+    // Find best days (high projected balance, no critical days)
+    const goodDays = monthCashFlow.days
+      .filter(
+        day =>
+          day.date >= startDate &&
+          day.date <= endDate &&
+          day.projectedBalance >= minBalance + dto.desiredAmount &&
+          !day.isCriticalDay,
+      )
+      .sort((a, b) => b.projectedBalance - a.projectedBalance);
+
+    if (goodDays.length === 0) {
+      // No perfect days, find least risky
+      const riskyDays = monthCashFlow.days
+        .filter(day => day.date >= startDate && day.date <= endDate)
+        .sort((a, b) => b.projectedBalance - a.projectedBalance);
+
+      const recommendedDay = riskyDays[0];
+
+      return {
+        recommendedDate: recommendedDay.date,
+        reason: '⚠️ Nenhum dia ideal encontrado. Este é o melhor disponível.',
+        projectedBalance: recommendedDay.projectedBalance,
+        recommendedStartDate: recommendedDay.date,
+        recommendedEndDate: recommendedDay.date,
+        safeSpendingLimit: Math.max(0, recommendedDay.projectedBalance - minBalance),
+        daysToAvoid: monthCashFlow.criticalDays.slice(0, 3).map(d => ({
+          date: d.date,
+          reason: d.reason,
+          paymentAmount: d.totalPayments,
+        })),
+        isRiskyForDesiredAmount: recommendedDay.projectedBalance < minBalance + dto.desiredAmount,
+        riskReason: `Saldo insuficiente. Faltam R$ ${(minBalance + dto.desiredAmount - recommendedDay.projectedBalance).toFixed(2)}`,
+      };
+    }
+
+    // Return best period (from first good day to last good day before critical day)
+    const bestStart = goodDays[0];
+    const bestEnd = goodDays[goodDays.length - 1];
+
+    // Check for critical days in between
+    const criticalInPeriod = monthCashFlow.criticalDays.filter(
+      c => c.date >= bestStart.date && c.date <= bestEnd.date,
+    );
+
+    // If critical day in period, shorten window
+    let finalEnd = bestEnd;
+    if (criticalInPeriod.length > 0) {
+      const daysBeforeCritical = monthCashFlow.days.filter(
+        d => d.date < criticalInPeriod[0].date && d.date >= bestStart.date,
+      );
+      finalEnd = daysBeforeCritical[daysBeforeCritical.length - 1] || bestStart;
+    }
+
+    return {
+      recommendedDate: bestStart.date,
+      reason: `🟢 Melhor período para compras`,
+      projectedBalance: bestStart.projectedBalance,
+      recommendedStartDate: bestStart.date,
+      recommendedEndDate: finalEnd.date,
+      safeSpendingLimit: bestStart.projectedBalance - minBalance,
+      daysToAvoid: monthCashFlow.criticalDays.slice(0, 3).map(d => ({
+        date: d.date,
+        reason: d.reason,
+        paymentAmount: d.totalPayments,
+      })),
+      isRiskyForDesiredAmount: false,
+    };
+  }
+
+  /**
+   * Get cash flow summary
+   */
+  async getCashFlowSummary(user: User): Promise<CashFlowSummaryDto> {
+    const now = new Date();
+    const currentMonth = await this.getMonthCashFlow(user, now.getMonth() + 1, now.getFullYear());
+
+    // Get current balance from accounts
+    const balance = await this.getCurrentBalance(user);
+
+    // Calculate trend (compare with previous month)
+    const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1);
+    const previousMonthCF = await this.getMonthCashFlow(
+      user,
+      prevMonth.getMonth() + 1,
+      prevMonth.getFullYear(),
+    );
+
+    const trend = previousMonthCF.totalExpenses > 0
+      ? ((currentMonth.totalExpenses - previousMonthCF.totalExpenses) / previousMonthCF.totalExpenses) * 100
+      : 0;
+
+    // Count days with low balance
+    const minBalance = 2000;
+    const daysLow = currentMonth.days.filter(d => d.projectedBalance < minBalance).length;
+
+    return {
+      currentBalance: balance,
+      totalIncome: currentMonth.totalIncome,
+      totalExpenses: currentMonth.totalExpenses,
+      totalPlanned: currentMonth.days.reduce((sum, d) => sum + d.plannedAccountsAmount, 0),
+      projectedEndOfMonth: currentMonth.closingBalance,
+      criticalDaysCount: currentMonth.criticalDays.length,
+      nextCriticalDay: currentMonth.criticalDays[0]?.date,
+      nextCriticalDayAmount: currentMonth.criticalDays[0]?.totalPayments,
+      daysWithLowBalance: daysLow,
+      balanceTrendPercentage: -trend, // Negative = spending less = positive trend
+    };
+  }
+
+  /**
+   * Helper: Get current balance from all accounts
+   */
+  private async getCurrentBalance(user: User): Promise<number> {
+    // Antes devolvia o valor fixo 5000, o que fazia todo o fluxo de caixa e o
+    // "melhor dia para compras" serem calculados sobre um saldo inventado.
+    // Cartões de crédito ficam de fora: o saldo deles é dívida, não disponível.
+    const result = await this.accountRepository
+      .createQueryBuilder('account')
+      .where('account.userId = :userId', { userId: user.id })
+      .andWhere('account.type != :creditCard', { creditCard: 'credit_card' })
+      .select('SUM(account.balance)', 'total')
+      .getRawOne<{ total: string | null }>();
+
+    return Number(result?.total ?? 0) || 0;
+  }
+
+  /**
+   * Helper: Get opening balance for a month
+   */
+  private async getOpeningBalance(user: User, monthStart: Date): Promise<number> {
+    // Try to get from previous month's snapshot
+    const previousDay = new Date(monthStart.getTime() - 24 * 60 * 60 * 1000);
+
+    const snapshot = await this.snapshotRepository.findOne({
+      where: {
+        userId: user.id,
+        snapshotDate: previousDay,
+      },
+    });
+
+    if (snapshot) {
+      return snapshot.closingBalance;
+    }
+
+    // Otherwise get current account balance
+    return this.getCurrentBalance(user);
+  }
+}
