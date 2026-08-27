@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Param,
   Body,
@@ -10,12 +11,18 @@ import {
   HttpCode,
   HttpStatus,
   Query,
+  DefaultValuePipe,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetCurrentUser } from '../../common/decorators/get-current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { ExpensesService } from './expenses.service';
-import { CreateExpenseDto, UpdateExpenseDto } from './dtos/create-expense.dto';
+import {
+  CreateExpenseDto,
+  SetExpensePaidDto,
+  UpdateExpenseDto,
+} from './dtos/create-expense.dto';
 
 @Controller('expenses')
 @UseGuards(JwtAuthGuard)
@@ -133,6 +140,26 @@ export class ExpensesController {
     return { responsible, total };
   }
 
+  /**
+   * Quantas contas a casa pagou no mês, e quanto somaram.
+   *
+   * Rota estática: precisa ser declarada ANTES de `:id`, senão o Nest casa
+   * "paid-summary" como um id de despesa.
+   *
+   * `DefaultValuePipe` é obrigatório porque o ValidationPipe global transforma
+   * o parâmetro ausente em `NaN` antes de o controller ver.
+   */
+  @Get('paid-summary')
+  async getPaidSummary(
+    @GetCurrentUser() user: User,
+    @Query('month', new DefaultValuePipe(new Date().getMonth() + 1), ParseIntPipe)
+    month: number,
+    @Query('year', new DefaultValuePipe(new Date().getFullYear()), ParseIntPipe)
+    year: number,
+  ) {
+    return this.expensesService.getPaidSummary(user, month, year);
+  }
+
   @Get(':id')
   async findOne(
     @Param('id') id: string,
@@ -149,6 +176,17 @@ export class ExpensesController {
     @Body() updateData: UpdateExpenseDto,
   ) {
     return this.expensesService.update(id, user, updateData);
+  }
+
+  /** Marca ou desmarca a despesa como paga (o ícone da lista de lançamentos). */
+  @Patch(':id/pay')
+  @HttpCode(HttpStatus.OK)
+  async setPaid(
+    @Param('id') id: string,
+    @GetCurrentUser() user: User,
+    @Body() dto: SetExpensePaidDto,
+  ) {
+    return this.expensesService.setPaid(id, user, dto.isPaid);
   }
 
   @Delete(':id')

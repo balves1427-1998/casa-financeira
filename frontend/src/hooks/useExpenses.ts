@@ -28,6 +28,11 @@ export interface Expense {
   currentInstallment?: number;
   observation?: string;
   origin: 'manual' | 'bank_statement' | 'credit_card' | 'import' | 'recurring';
+  /** Se o dinheiro já saiu — distinto da data do lançamento. */
+  isPaid: boolean;
+  paidAt?: string | null;
+  /** Conta do Planejado vinculada, quando a despesa é recorrente. */
+  plannedAccountId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -58,6 +63,9 @@ function normalizeExpense(raw: any): Expense {
       raw?.currentInstallment === null || raw?.currentInstallment === undefined
         ? undefined
         : Number(raw.currentInstallment),
+    // Registros anteriores à coluna vêm sem o campo: tratar `undefined` como
+    // "não pago" evita que a lista mostre um estado indefinido.
+    isPaid: Boolean(raw?.isPaid),
   } as Expense;
 }
 
@@ -190,6 +198,56 @@ export const useExpenses = () => {
     [fetchCategoryBreakdown],
   );
 
+  /**
+   * Marca ou desmarca a despesa como paga.
+   *
+   * Atualiza só o registro afetado no estado — recarregar a lista inteira
+   * faria a tela piscar a cada clique no ícone.
+   */
+  const setExpensePaid = useCallback(
+    async (id: string, isPaid: boolean) => {
+      try {
+        setIsSaving(true);
+        setError(null);
+        const updated = normalizeExpense(await apiClient.setExpensePaid(id, isPaid));
+        setExpenses((prev) =>
+          prev.map((expense) => (expense.id === id ? updated : expense)),
+        );
+        return updated;
+      } catch (err) {
+        const errorMessage = getApiErrorMessage(
+          err,
+          'Erro ao alterar a situação de pagamento',
+        );
+        setError(errorMessage);
+        throw new Error(errorMessage);
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [],
+  );
+
+  /**
+   * Quantas contas a casa pagou no mês, e quanto somaram.
+   *
+   * A contagem é feita no backend porque ele enxerga todos os lançamentos da
+   * família; contar sobre a lista carregada aqui daria um número menor sempre
+   * que houvesse filtro aplicado.
+   */
+  const getPaidSummary = useCallback(async (month: number, year: number) => {
+    try {
+      const data = await apiClient.getExpensesPaidSummary(month, year);
+      return {
+        count: Number(data?.count) || 0,
+        total: Number(data?.total) || 0,
+      };
+    } catch (err) {
+      console.error('Error fetching paid summary:', err);
+      return { count: 0, total: 0 };
+    }
+  }, []);
+
   // Fetch expenses by category
   const fetchByCategory = useCallback(async (category: string) => {
     try {
@@ -318,6 +376,8 @@ export const useExpenses = () => {
     createExpense,
     updateExpense,
     deleteExpense,
+    setExpensePaid,
+    getPaidSummary,
     fetchByCategory,
     fetchByResponsible,
     fetchByDateRange,

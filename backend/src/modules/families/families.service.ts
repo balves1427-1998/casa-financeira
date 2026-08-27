@@ -165,6 +165,25 @@ export class FamiliesService {
 
   /**
    * Adiciona um usuário já cadastrado à família, pelo e-mail.
+   *
+   * FALHA DE DESENHO CORRIGIDA AQUI
+   * -------------------------------
+   * O cadastro cria uma família automática para cada novo usuário. Duas pessoas
+   * que se cadastraram separadamente — o caso normal de um casal — ficavam cada
+   * uma sozinha na própria família. E as duas regras antigas se travavam
+   * mutuamente:
+   *
+   *   • `addMember` recusava quem já tivesse família ("precisa sair dela antes");
+   *   • `removeMember` recusava a saída do último membro.
+   *
+   * Resultado: era impossível formar uma casa pela interface. A saída não é
+   * afrouxar a permissão, é reconhecer que uma família com um único membro não
+   * guarda nada — despesas, receitas, metas e planejados pertencem ao `userId`,
+   * não ao `familyId`. Mover essa pessoa não órfã lançamento nenhum, e a
+   * família vazia é desativada.
+   *
+   * Uma família com DOIS OU MAIS membros continua protegida: aí a mudança
+   * afetaria terceiros, e a pessoa precisa sair explicitamente antes.
    */
   async addMember(
     familyId: string,
@@ -186,14 +205,30 @@ export class FamiliesService {
       throw new BadRequestException('Esse usuário já é membro desta família');
     }
 
-    if (invited.familyId) {
-      throw new BadRequestException(
-        'Esse usuário já pertence a outra família. Ele precisa sair dela antes.',
-      );
+    const familiaAnterior = invited.familyId;
+
+    if (familiaAnterior) {
+      const membrosAnteriores = await this.listMemberEntities(familiaAnterior);
+
+      if (membrosAnteriores.length > 1) {
+        throw new BadRequestException(
+          'Esse usuário já pertence a outra família com mais membros. ' +
+            'Ele precisa sair dela antes de entrar nesta.',
+        );
+      }
     }
 
     invited.familyId = familyId;
     await this.userRepository.save(invited);
+
+    // A família que ficou vazia é desativada, não apagada: o histórico de
+    // relatórios já gerados aponta para ela.
+    if (familiaAnterior) {
+      await this.desativarSeVazia(familiaAnterior);
+      this.logger.log(
+        `Usuário ${invited.id} migrou da família ${familiaAnterior} para ${familyId}`,
+      );
+    }
 
     this.logger.log(`Usuário ${invited.id} adicionado à família ${familyId}`);
 
@@ -201,10 +236,63 @@ export class FamiliesService {
   }
 
   /**
+   * O usuário autenticado entra na família de outra pessoa, informando o e-mail
+   * dela.
+   *
+   * É o caminho inverso do convite, e existe porque só um dos dois lados
+   * costuma estar com o sistema aberto na hora de juntar as contas da casa.
+   */
+  async joinFamilyOf(
+    userId: string,
+    emailDoAnfitriao: string,
+  ): Promise<FamilyDto> {
+    const solicitante = await this.userRepository.findOne({
+      where: { id: userId },
+    });
+
+    if (!solicitante) {
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
+    const anfitriao = await this.userRepository.findOne({
+      where: { email: emailDoAnfitriao },
+    });
+
+    if (!anfitriao) {
+      throw new NotFoundException(
+        `Nenhum usuário cadastrado com o e-mail ${emailDoAnfitriao}`,
+      );
+    }
+
+    if (anfitriao.id === userId) {
+      throw new BadRequestException(
+        'Informe o e-mail da outra pessoa, não o seu.',
+      );
+    }
+
+    if (!anfitriao.familyId) {
+      throw new BadRequestException(
+        'Esse usuário ainda não tem família. Peça para ele criar uma primeiro.',
+      );
+    }
+
+    // O `requesterId` é o anfitrião: é a família DELE que recebe o membro, e a
+    // checagem de pertencimento precisa passar por alguém que já está lá.
+    await this.addMember(anfitriao.familyId, anfitriao.id, solicitante.email);
+
+    return this.getById(anfitriao.familyId, userId);
+  }
+
+  /**
    * Remove um membro da família.
    *
-   * O último membro não pode sair: isso deixaria os lançamentos da família
-   * órfãos, sem ninguém com permissão para consultá-los.
+   * O último membro PODE sair, ao contrário do que a regra anterior supunha.
+   * Ela existia para não deixar lançamentos órfãos — mas despesas, receitas,
+   * metas e contas planejadas pertencem ao `userId`, nunca ao `familyId`. Uma
+   * família sem membros não guarda nada, e proibir a saída só prendia quem se
+   * cadastrou sozinho numa casa de uma pessoa só.
+   *
+   * A família esvaziada é desativada em seguida.
    */
   async removeMember(
     familyId: string,
@@ -220,14 +308,18 @@ export class FamiliesService {
       throw new NotFoundException('Esse usuário não é membro desta família');
     }
 
-    if (members.length === 1) {
-      throw new BadRequestException(
-        'Não é possível remover o último membro da família.',
+    if (memberId !== requesterId) {
+      // Tirar outra pessoa da casa faz ela perder de vista o histórico
+      // compartilhado. Continua permitido, mas fica registrado quem fez.
+      this.logger.warn(
+        `Usuário ${requesterId} removeu ${memberId} da família ${familyId}`,
       );
     }
 
     target.familyId = undefined;
     await this.userRepository.save(target);
+
+    await this.desativarSeVazia(familyId);
 
     this.logger.log(`Usuário ${memberId} removido da família ${familyId}`);
   }
@@ -244,6 +336,23 @@ export class FamiliesService {
   }
 
   // ==================== helpers ====================
+
+  /**
+   * Desativa a família que ficou sem membros.
+   *
+   * Desativar, e não apagar: relatórios já gerados guardam o `familyId`, e
+   * remover a linha os deixaria apontando para o vazio.
+   */
+  private async desativarSeVazia(familyId: string): Promise<void> {
+    const restantes = await this.listMemberEntities(familyId);
+
+    if (restantes.length > 0) {
+      return;
+    }
+
+    await this.familyRepository.update(familyId, { isActive: false });
+    this.logger.log(`Família ${familyId} ficou sem membros e foi desativada`);
+  }
 
   private async listMemberEntities(familyId: string): Promise<User[]> {
     return this.userRepository.find({

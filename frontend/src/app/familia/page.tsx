@@ -28,6 +28,7 @@ export default function FamiliaPage() {
     createFamily,
     updateFamily,
     addMember,
+    joinFamily,
     removeMember,
     clearError,
   } = useFamily();
@@ -42,6 +43,9 @@ export default function FamiliaPage() {
 
   // Adicionar membro por e-mail
   const [memberEmail, setMemberEmail] = useState('');
+
+  // Entrar na família de outra pessoa (o caminho inverso do convite)
+  const [joinEmail, setJoinEmail] = useState('');
 
   // Confirmação inline de remoção (sem window.confirm: diálogos nativos
   // travam a automação do navegador)
@@ -96,6 +100,20 @@ export default function FamiliaPage() {
     }
   };
 
+  const handleJoinFamily = async (event: FormEvent) => {
+    event.preventDefault();
+    setFeedback(null);
+    try {
+      const familia = await joinFamily(joinEmail);
+      setJoinEmail('');
+      setFeedback(
+        `Você agora faz parte de "${familia.name}". Os lançamentos das duas contas passam a somar juntos.`,
+      );
+    } catch {
+      // O erro já é exibido pelo estado do hook
+    }
+  };
+
   const handleRemoveMember = async (memberId: string) => {
     setFeedback(null);
     try {
@@ -110,6 +128,7 @@ export default function FamiliaPage() {
   const isNameValid = name.trim().length >= 2;
   const isNewNameValid = newName.trim().length >= 2;
   const isEmailValid = /\S+@\S+\.\S+/.test(memberEmail.trim());
+  const isJoinEmailValid = /\S+@\S+\.\S+/.test(joinEmail.trim());
 
   return (
     <div className="max-w-5xl mx-auto p-6 md:p-8 space-y-6">
@@ -444,6 +463,45 @@ export default function FamiliaPage() {
                   <UserPlus className="w-4 h-4" />
                 )}
                 Adicionar
+              </button>
+            </form>
+          </div>
+
+          {/* Entrar na família de outra pessoa */}
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1 flex items-center gap-2">
+              <Home className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+              Entrar na família de outra pessoa
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Use quando cada um se cadastrou por conta própria: em vez de
+              convidar, você passa a fazer parte da casa dela. Sua família atual
+              — que só tem você — é desativada, e nenhum lançamento seu é
+              perdido: eles continuam ligados ao seu usuário e passam a aparecer
+              nos totais da casa nova.
+            </p>
+
+            <form onSubmit={handleJoinFamily} className="flex flex-col sm:flex-row gap-3">
+              <input
+                id="join-email"
+                type="email"
+                value={joinEmail}
+                onChange={event => setJoinEmail(event.target.value)}
+                placeholder="email@exemplo.com"
+                aria-label="E-mail de quem já tem a família"
+                className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <button
+                type="submit"
+                disabled={!isJoinEmailValid || isSaving}
+                className="px-4 py-2 rounded-lg border border-indigo-600 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                {isSaving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Users className="w-4 h-4" />
+                )}
+                Entrar nessa família
               </button>
             </form>
           </div>

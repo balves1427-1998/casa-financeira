@@ -5,6 +5,7 @@ import { ExpensesService } from '../expenses.service';
 import { Expense } from '../entities/expense.entity';
 import { FamiliesService } from '../../families/families.service';
 import { User } from '../../users/entities/user.entity';
+import { PlannedAccount } from '../../planned-accounts/entities/planned-account.entity';
 
 /**
  * Testes unitários do ExpensesService — escopo de leitura por FAMÍLIA.
@@ -104,15 +105,37 @@ describe('ExpensesService', () => {
     create: jest.fn(),
     save: jest.fn(),
     softRemove: jest.fn(),
+    // Usado para gravar o vínculo com a conta planejada recém-criada.
+    update: jest.fn(),
   };
 
   const mockFamiliesService = {
     getMemberIds: jest.fn(),
   };
 
+  /**
+   * Repositório de contas planejadas.
+   *
+   * O service passou a criar a próxima ocorrência no Planejado quando a
+   * despesa é recorrente; sem este mock o módulo de teste nem compila.
+   */
+  let plannedQueryBuilder: any;
+
+  const mockPlannedAccountsRepository = {
+    createQueryBuilder: jest.fn(() => plannedQueryBuilder),
+    create: jest.fn((dados: any) => dados),
+    save: jest.fn(async (dados: any) => ({ id: 'planned-novo', ...dados })),
+    update: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
     queryBuilder = criarQueryBuilder();
+
+    // Por padrão, nenhuma conta planejada equivalente existe — a checagem de
+    // duplicidade não encontra nada e a criação segue em frente.
+    plannedQueryBuilder = criarQueryBuilder();
+    plannedQueryBuilder.getOne.mockResolvedValue(null);
 
     // Por padrão, a casa tem os dois responsáveis.
     mockFamiliesService.getMemberIds.mockResolvedValue([
@@ -126,6 +149,10 @@ describe('ExpensesService', () => {
         {
           provide: getRepositoryToken(Expense),
           useValue: mockExpensesRepository,
+        },
+        {
+          provide: getRepositoryToken(PlannedAccount),
+          useValue: mockPlannedAccountsRepository,
         },
         { provide: FamiliesService, useValue: mockFamiliesService },
       ],
@@ -381,6 +408,184 @@ describe('ExpensesService', () => {
         BRUNO.id,
         GIOVANNA.id,
       ]);
+    });
+  });
+
+  /**
+   * Despesa recorrente → conta no Planejado.
+   *
+   * O que se quer garantir: a conta gerada é a PRÓXIMA ocorrência (a atual já
+   * está registrada como despesa — duplicá-la faria o fluxo de caixa contar a
+   * mesma saída duas vezes), e uma conta equivalente já existente na casa
+   * impede a criação de uma segunda.
+   */
+  describe('despesa recorrente gera conta planejada', () => {
+    const montarDespesa = (extra: Partial<Expense> = {}) => {
+      const base = {
+        id: 'expense-aluguel',
+        userId: BRUNO.id,
+        description: 'Aluguel',
+        amount: 1800,
+        date: new Date('2026-08-05T00:00:00.000Z'),
+        category: 'Moradia',
+        responsible: 'bruno',
+        paymentMethod: 'transfer',
+        isRecurring: true,
+        frequency: 'monthly',
+        isPaid: false,
+        ...extra,
+      } as unknown as Expense;
+
+      mockExpensesRepository.create.mockReturnValue(base);
+      mockExpensesRepository.save.mockResolvedValue(base);
+
+      return base;
+    };
+
+    it('cria a conta planejada no vencimento do mês seguinte', async () => {
+      montarDespesa();
+
+      await service.create(BRUNO, {} as any);
+
+      expect(mockPlannedAccountsRepository.save).toHaveBeenCalledTimes(1);
+
+      const criada = mockPlannedAccountsRepository.create.mock.calls[0][0];
+      expect(criada.description).toBe('Aluguel');
+      expect(criada.amount).toBe(1800);
+      expect(criada.status).toBe('pending');
+      // Setembro, não agosto: a ocorrência de agosto é a despesa em si.
+      expect(criada.dueDate.getMonth()).toBe(8);
+      expect(criada.dueDate.getDate()).toBe(5);
+    });
+
+    it('não duplica quando a casa já tem a mesma conta para o vencimento', async () => {
+      montarDespesa();
+      plannedQueryBuilder.getOne.mockResolvedValue({ id: 'planned-existente' });
+
+      await service.create(BRUNO, {} as any);
+
+      expect(mockPlannedAccountsRepository.save).not.toHaveBeenCalled();
+      // A busca por duplicidade olha a família inteira, não só quem lançou.
+      expect(plannedQueryBuilder.state.params.userIds).toEqual([
+        BRUNO.id,
+        GIOVANNA.id,
+      ]);
+    });
+
+    it('não cria nada quando a despesa não é recorrente', async () => {
+      montarDespesa({ isRecurring: false } as Partial<Expense>);
+
+      await service.create(BRUNO, {} as any);
+
+      expect(mockPlannedAccountsRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('o mês seguinte nunca escorrega para o mês errado (31/01 → 28/02)', async () => {
+      montarDespesa({ date: new Date('2026-01-31T00:00:00.000Z') } as Partial<Expense>);
+
+      await service.create(BRUNO, {} as any);
+
+      const criada = mockPlannedAccountsRepository.create.mock.calls[0][0];
+      // `setMonth` puro levaria 31/01 para 03/03. Tem que parar em fevereiro.
+      expect(criada.dueDate.getMonth()).toBe(1);
+      expect(criada.dueDate.getDate()).toBe(28);
+    });
+
+    it('a falha ao planejar não derruba o lançamento da despesa', async () => {
+      montarDespesa();
+      mockPlannedAccountsRepository.save.mockRejectedValueOnce(
+        new Error('banco indisponível'),
+      );
+
+      // O gasto é o fato; o planejamento é derivado dele.
+      await expect(service.create(BRUNO, {} as any)).resolves.toBeDefined();
+    });
+  });
+
+  describe('marcar como paga', () => {
+    const DESPESA_PENDENTE = {
+      id: 'expense-bruno',
+      userId: BRUNO.id,
+      description: 'Internet',
+      amount: 120,
+      isPaid: false,
+    } as Expense;
+
+    beforeEach(() => {
+      queryBuilder.getOne.mockResolvedValue({ ...DESPESA_PENDENTE });
+      mockExpensesRepository.save.mockImplementation(async (e: any) => e);
+    });
+
+    it('marca a despesa e registra a data do pagamento', async () => {
+      const resultado = await service.setPaid('expense-bruno', BRUNO, true);
+
+      expect(resultado.isPaid).toBe(true);
+      expect(resultado.paidAt).toBeInstanceOf(Date);
+    });
+
+    it('desmarcar limpa a data do pagamento', async () => {
+      queryBuilder.getOne.mockResolvedValue({
+        ...DESPESA_PENDENTE,
+        isPaid: true,
+        paidAt: new Date(),
+      });
+
+      const resultado = await service.setPaid('expense-bruno', BRUNO, false);
+
+      expect(resultado.isPaid).toBe(false);
+      expect(resultado.paidAt).toBeUndefined();
+    });
+
+    it('propaga o pagamento para a conta planejada vinculada', async () => {
+      queryBuilder.getOne.mockResolvedValue({
+        ...DESPESA_PENDENTE,
+        plannedAccountId: 'planned-aluguel',
+      });
+
+      await service.setPaid('expense-bruno', BRUNO, true);
+
+      expect(mockPlannedAccountsRepository.update).toHaveBeenCalledWith(
+        'planned-aluguel',
+        expect.objectContaining({ status: 'paid' }),
+      );
+    });
+
+    it('só quem lançou pode marcar como paga', async () => {
+      queryBuilder.getOne.mockResolvedValue({ ...DESPESA_DA_GIOVANNA });
+
+      await expect(
+        service.setPaid('expense-giovanna', BRUNO, true),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('resumo de contas pagas no mês', () => {
+    it('converte a contagem e o total, que vêm como texto do Postgres', async () => {
+      queryBuilder.state.raw = { count: '4', total: '5820.00' };
+
+      const resumo = await service.getPaidSummary(BRUNO, 8, 2026);
+
+      expect(resumo).toEqual({ count: 4, total: 5820 });
+    });
+
+    it('conta no escopo da família, não só de quem pergunta', async () => {
+      queryBuilder.state.raw = { count: '2', total: '300.00' };
+
+      await service.getPaidSummary(BRUNO, 8, 2026);
+
+      expect(queryBuilder.state.params.userIds).toEqual([
+        BRUNO.id,
+        GIOVANNA.id,
+      ]);
+    });
+
+    it('devolve zero quando o mês não teve pagamento', async () => {
+      queryBuilder.state.raw = { count: '0', total: null };
+
+      await expect(service.getPaidSummary(BRUNO, 2, 2026)).resolves.toEqual({
+        count: 0,
+        total: 0,
+      });
     });
   });
 });

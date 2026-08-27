@@ -72,7 +72,41 @@ import {
   ReportFormat,
 } from '@/types/report';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+export const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+
+/**
+ * `fetch` já autenticado, para os hooks que não passam pelo cliente axios.
+ *
+ * Existe porque quatro hooks (relatórios, previsão, regras e analytics) foram
+ * escritos assumindo cookie de sessão (`credentials: 'include'`) ou lendo o
+ * token da chave errada do localStorage (`token`, quando o login grava
+ * `access_token`). Nos dois casos a API respondia 401 e a tela mostrava um
+ * "Failed to fetch..." sem explicar a causa. Concentrar a montagem do header
+ * aqui evita que a divergência volte a aparecer em cada hook novo.
+ *
+ * `path` é relativo à API (`/reports/generate`), sem a base.
+ */
+export async function authFetch(
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const token =
+    typeof window !== 'undefined'
+      ? localStorage.getItem('access_token')
+      : null;
+
+  return fetch(`${API_URL}${path}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...((init.headers as Record<string, string>) ?? {}),
+      // Vem por último de propósito: sobrescreve qualquer Authorization que o
+      // chamador tenha montado por conta própria.
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+}
 
 /**
  * Extrai o nome do arquivo de um cabeçalho `Content-Disposition`.
@@ -563,6 +597,50 @@ class ApiClient {
     return response.data;
   }
 
+  /** Marca ou desmarca uma despesa como paga. */
+  async setExpensePaid(id: string, isPaid: boolean) {
+    const response = await this.client.patch(`/expenses/${id}/pay`, { isPaid });
+    return response.data;
+  }
+
+  /** Quantas contas a casa pagou no mês, e quanto somaram. */
+  async getExpensesPaidSummary(
+    month: number,
+    year: number,
+  ): Promise<{ count: number; total: number }> {
+    const response = await this.client.get('/expenses/paid-summary', {
+      params: { month, year },
+    });
+    return response.data;
+  }
+
+  // Cash flow endpoints
+  //
+  // Estes métodos existem porque o hook do Fluxo de Caixa chamava `fetch`
+  // direto com `credentials: 'include'` — cookie, que esta API não usa. Sem o
+  // header `Authorization`, toda chamada voltava 401 e a tela exibia
+  // "Failed to fetch cash flow: Unauthorized".
+  async getCashFlowMonth(month: number, year: number) {
+    const response = await this.client.get(`/cash-flow/${month}/${year}`);
+    return response.data;
+  }
+
+  async getCashFlowSummary() {
+    const response = await this.client.get('/cash-flow/summary/current');
+    return response.data;
+  }
+
+  async getCashFlowBestDay(data: {
+    desiredAmount: number;
+    startDate?: string;
+    endDate?: string;
+    minimumBalanceThreshold?: number;
+    onlyLowRisk?: boolean;
+  }) {
+    const response = await this.client.post('/cash-flow/best-day', data);
+    return response.data;
+  }
+
   // AI Assistant (chat) endpoints
   async sendAiChatMessage(data: SendChatMessageDto): Promise<ChatMessageResponseDto> {
     const response = await this.client.post('/ai/chat', data);
@@ -802,6 +880,18 @@ class ApiClient {
 
   async removeFamilyMember(familyId: string, memberId: string): Promise<void> {
     await this.client.delete(`/families/${familyId}/members/${memberId}`);
+  }
+
+  /**
+   * Entra na família de outra pessoa pelo e-mail dela.
+   *
+   * É o caminho para juntar duas contas criadas separadamente — cada cadastro
+   * novo nasce com a própria família, e sem este endpoint não havia como
+   * fundi-las pela interface.
+   */
+  async joinFamily(email: string): Promise<FamilyDto> {
+    const response = await this.client.post('/families/join', { email });
+    return response.data;
   }
 
   /**

@@ -6,8 +6,7 @@ import {
   ForecastPeriod,
   SensitivityAnalysisDto,
 } from '../types/forecasting';
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+import { authFetch } from '../lib/api';
 
 interface UseForecastingState {
   summary: ForecastSummaryDto | null;
@@ -33,9 +32,8 @@ export function useForecasting() {
     async (dto: GenerateForecastDto) => {
       setState(prev => ({ ...prev, isLoading: true, error: null }));
       try {
-        const response = await fetch(`${API_BASE_URL}/forecasting/generate`, {
+        const response = await authFetch(`/forecasting/generate`, {
           method: 'POST',
-          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
           },
@@ -77,8 +75,7 @@ export function useForecasting() {
   const fetchForecastSummary = useCallback(async () => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     try {
-      const response = await fetch(`${API_BASE_URL}/forecasting/summary`, {
-        credentials: 'include',
+      const response = await authFetch(`/forecasting/summary`, {
         headers: {
           'Content-Type': 'application/json',
         },
@@ -124,10 +121,9 @@ export function useForecasting() {
           percentageChange: percentageChange.toString(),
         });
 
-        const response = await fetch(
-          `${API_BASE_URL}/forecasting/sensitivity?${params}`,
+        const response = await authFetch(
+          `/forecasting/sensitivity?${params}`,
           {
-            credentials: 'include',
             headers: {
               'Content-Type': 'application/json',
             },

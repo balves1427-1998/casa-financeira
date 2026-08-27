@@ -105,6 +105,23 @@ export class CreateExpenseDto {
   @IsOptional()
   @IsEnum(ExpenseOrigin)
   origin?: ExpenseOrigin;
+
+  /**
+   * Opcional: quando omitido, o serviço decide pela forma de pagamento — à
+   * vista com data passada já nasce paga; no crédito, não.
+   */
+  @IsOptional()
+  @IsBoolean()
+  isPaid?: boolean;
+}
+
+/**
+ * Marca ou desmarca uma despesa como paga.
+ */
+export class SetExpensePaidDto {
+  @IsNotEmpty()
+  @IsBoolean()
+  isPaid: boolean;
 }
 
 /**
@@ -183,4 +200,8 @@ export class UpdateExpenseDto {
   @IsOptional()
   @IsEnum(ExpenseOrigin)
   origin?: ExpenseOrigin;
+
+  @IsOptional()
+  @IsBoolean()
+  isPaid?: boolean;
 }

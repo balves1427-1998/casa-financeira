@@ -20,12 +20,22 @@ interface KPIData {
   incomeLastMonth: number;
   highestExpenseCategory: { category: string; amount: number };
   dailyAverage: number;
+  /** Contas efetivamente pagas no mês (quantidade e soma). */
+  paidThisMonth: { count: number; total: number };
+  /** Lançamentos do mês que ainda não foram marcados como pagos. */
+  pendingThisMonth: { count: number; total: number };
 }
 
 export default function DashboardPage() {
   const { user, isLoading: authLoading } = useAuth();
   const { accounts, totalBalance, isLoading: accountsLoading } = useAccounts();
-  const { expenses, getDailyAverage, getMonthlyTotal: getExpenseMonthlyTotal, getCategoryBreakdown } = useExpenses();
+  const {
+    expenses,
+    getDailyAverage,
+    getMonthlyTotal: getExpenseMonthlyTotal,
+    getCategoryBreakdown,
+    getPaidSummary,
+  } = useExpenses();
   const { incomes, getMonthlyTotal: getIncomeMonthlyTotal } = useIncome();
   const [kpiData, setKpiData] = useState<KPIData>({
     currentBalance: 0,
@@ -38,6 +48,8 @@ export default function DashboardPage() {
     incomeLastMonth: 0,
     highestExpenseCategory: { category: '', amount: 0 },
     dailyAverage: 0,
+    paidThisMonth: { count: 0, total: 0 },
+    pendingThisMonth: { count: 0, total: 0 },
   });
   const [isLoadingKPI, setIsLoadingKPI] = useState(true);
 
@@ -79,6 +91,21 @@ export default function DashboardPage() {
         });
         const upcomingPayments = upcomingExpenses.reduce((sum, e) => sum + e.amount, 0);
 
+        // Contas pagas no mês. A contagem vem do backend, que enxerga TODOS os
+        // lançamentos da família — a lista carregada aqui pode estar filtrada
+        // ou paginada, e contar sobre ela daria um número menor que o real.
+        const paidThisMonth = await getPaidSummary(currentMonth, currentYear);
+
+        // O pendente é a diferença: o que o mês registrou menos o que já saiu.
+        const lancamentosDoMes = expenses.filter((e) => {
+          const data = new Date(e.date);
+          return (
+            data.getMonth() + 1 === currentMonth &&
+            data.getFullYear() === currentYear
+          );
+        });
+        const pendentes = lancamentosDoMes.filter((e) => !e.isPaid);
+
         setKpiData({
           currentBalance: totalBalance,
           monthlyIncome,
@@ -93,6 +120,11 @@ export default function DashboardPage() {
             amount: parseFloat(highestCategory?.total ?? '0') || 0,
           },
           dailyAverage: dailyAvg,
+          paidThisMonth,
+          pendingThisMonth: {
+            count: pendentes.length,
+            total: pendentes.reduce((soma, e) => soma + e.amount, 0),
+          },
         });
       } catch (error) {
         console.error('Error calculating KPIs:', error);
@@ -211,6 +243,64 @@ export default function DashboardPage() {
               </p>
             </div>
             <div className="text-3xl">🎯</div>
+          </div>
+        </Card>
+      </div>
+
+      {/* Situação das contas do mês */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Contas pagas no mês */}
+        <Card>
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-sm text-gray-600 dark:text-gray-400 font-medium mb-1">
+                Contas Pagas no Mês
+              </p>
+              <p className="text-3xl font-bold text-green-600">
+                {kpiData.paidThisMonth.count}
+                <span className="text-base font-medium text-gray-500 dark:text-gray-400">
+                  {kpiData.paidThisMonth.count === 1 ? ' conta' : ' contas'}
+                </span>
+              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                R${' '}
+                {kpiData.paidThisMonth.total.toLocaleString('pt-BR', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}{' '}
+                já saíram do caixa
+              </p>
+            </div>
+            <div className="text-3xl">✅</div>
+          </div>
+        </Card>
+
+        {/* Ainda pendentes */}
+        <Card>
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-sm text-gray-600 dark:text-gray-400 font-medium mb-1">
+                Ainda a Pagar no Mês
+              </p>
+              <p className="text-3xl font-bold text-amber-600">
+                {kpiData.pendingThisMonth.count}
+                <span className="text-base font-medium text-gray-500 dark:text-gray-400">
+                  {kpiData.pendingThisMonth.count === 1 ? ' conta' : ' contas'}
+                </span>
+              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                R${' '}
+                {kpiData.pendingThisMonth.total.toLocaleString('pt-BR', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}{' '}
+                em aberto ·{' '}
+                <Link href="/despesas" className="text-indigo-600 underline">
+                  marcar como paga
+                </Link>
+              </p>
+            </div>
+            <div className="text-3xl">🕒</div>
           </div>
         </Card>
       </div>

@@ -11,8 +11,7 @@ import {
   GetAnomaliesDto,
   ReviewAnomalyDto,
 } from '@/types/analytics';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+import { authFetch } from '../lib/api';
 
 interface UseAnalyticsState {
   spendingPattern: SpendingPatternDto | null;
@@ -45,9 +44,8 @@ export function useAnalytics() {
       if (dto?.year) params.append('year', dto.year.toString());
       if (dto?.categoryId) params.append('categoryId', dto.categoryId);
 
-      const response = await fetch(`${API_BASE}/analytics/spending-pattern?${params}`, {
+      const response = await authFetch(`/analytics/spending-pattern?${params}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
       });
 
@@ -79,9 +77,8 @@ export function useAnalytics() {
       if (dto?.year) params.append('year', dto.year.toString());
       if (dto?.status) params.append('status', dto.status);
 
-      const response = await fetch(`${API_BASE}/analytics/anomalies?${params}`, {
+      const response = await authFetch(`/analytics/anomalies?${params}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
       });
 
@@ -104,11 +101,10 @@ export function useAnalytics() {
   const reviewAnomaly = useCallback(
     async (anomalyId: string, dto: ReviewAnomalyDto) => {
       try {
-        const response = await fetch(`${API_BASE}/analytics/anomalies/${anomalyId}/review`, {
+        const response = await authFetch(`/analytics/anomalies/${anomalyId}/review`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
           },
           body: JSON.stringify(dto),
         });
@@ -136,9 +132,8 @@ export function useAnalytics() {
       const params = new URLSearchParams();
       params.append('months', months.toString());
 
-      const response = await fetch(`${API_BASE}/analytics/trends/${categoryId}?${params}`, {
+      const response = await authFetch(`/analytics/trends/${categoryId}?${params}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
       });
 
@@ -170,9 +165,8 @@ export function useAnalytics() {
       if (month) params.append('month', month.toString());
       if (year) params.append('year', year.toString());
 
-      const response = await fetch(`${API_BASE}/analytics/comparison?${params}`, {
+      const response = await authFetch(`/analytics/comparison?${params}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
       });
 
@@ -197,9 +191,8 @@ export function useAnalytics() {
   const getSummary = useCallback(async () => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     try {
-      const response = await fetch(`${API_BASE}/analytics/summary`, {
+      const response = await authFetch(`/analytics/summary`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
       });
 

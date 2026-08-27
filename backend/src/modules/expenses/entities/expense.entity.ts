@@ -73,6 +73,27 @@ export class Expense {
   @Column({ nullable: true })
   observation?: string;
 
+  /**
+   * Se o dinheiro já saiu.
+   *
+   * Não é redundante com `date`: uma compra no crédito acontece hoje e só afeta
+   * o caixa no vencimento da fatura. É esta coluna, e não a data, que responde
+   * "quantas contas foram pagas neste mês?".
+   */
+  @Column({ default: false })
+  isPaid: boolean;
+
+  @Column({ nullable: true })
+  paidAt?: Date;
+
+  /**
+   * Conta do Planejado ligada a esta despesa — a que a originou, ou a que foi
+   * criada a partir dela quando a despesa é recorrente. O vínculo é o que
+   * impede o mesmo compromisso de ser lançado duas vezes.
+   */
+  @Column({ nullable: true })
+  plannedAccountId?: string;
+
   @Column({
     type: 'enum',
     enum: ['manual', 'bank_statement', 'credit_card', 'import', 'recurring'],

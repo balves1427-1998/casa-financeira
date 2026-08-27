@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import { authFetch } from '../lib/api';
 
 export interface CustomRule {
   id: string;
@@ -74,16 +75,13 @@ export function useCustomRules() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
-
   /**
    * Fetch all custom rules
    */
   const fetchRules = useCallback(async () => {
     try {
       setIsLoading(true);
-      const response = await fetch(`${API_BASE}/classification-rules`, {
-        credentials: 'include',
+      const response = await authFetch(`/classification-rules`, {
       });
       if (!response.ok) throw new Error('Failed to fetch rules');
       const data = await response.json();
@@ -95,7 +93,7 @@ export function useCustomRules() {
     } finally {
       setIsLoading(false);
     }
-  }, [API_BASE]);
+  }, []);
 
   /**
    * Create a new custom rule
@@ -113,11 +111,10 @@ export function useCustomRules() {
     }) => {
       try {
         setIsLoading(true);
-        const response = await fetch(`${API_BASE}/classification-rules/custom`, {
+        const response = await authFetch(`/classification-rules/custom`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(ruleData),
-          credentials: 'include',
         });
         if (!response.ok) throw new Error('Failed to create rule');
         const newRule = await response.json();
@@ -132,7 +129,7 @@ export function useCustomRules() {
         setIsLoading(false);
       }
     },
-    [API_BASE, rules],
+    [rules],
   );
 
   /**
@@ -154,13 +151,12 @@ export function useCustomRules() {
     ) => {
       try {
         setIsLoading(true);
-        const response = await fetch(
-          `${API_BASE}/classification-rules/custom/${id}`,
+        const response = await authFetch(
+          `/classification-rules/custom/${id}`,
           {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(ruleData),
-            credentials: 'include',
           },
         );
         if (!response.ok) throw new Error('Failed to update rule');
@@ -176,7 +172,7 @@ export function useCustomRules() {
         setIsLoading(false);
       }
     },
-    [API_BASE, rules],
+    [rules],
   );
 
   /**
@@ -186,11 +182,10 @@ export function useCustomRules() {
     async (id: string) => {
       try {
         setIsLoading(true);
-        const response = await fetch(
-          `${API_BASE}/classification-rules/${id}`,
+        const response = await authFetch(
+          `/classification-rules/${id}`,
           {
             method: 'DELETE',
-            credentials: 'include',
           },
         );
         if (!response.ok) throw new Error('Failed to delete rule');
@@ -204,7 +199,7 @@ export function useCustomRules() {
         setIsLoading(false);
       }
     },
-    [API_BASE, rules],
+    [rules],
   );
 
   /**
@@ -214,13 +209,12 @@ export function useCustomRules() {
     async (pattern: string, matchType: string, testStrings: string[]) => {
       try {
         setIsLoading(true);
-        const response = await fetch(
-          `${API_BASE}/classification-rules/test-pattern`,
+        const response = await authFetch(
+          `/classification-rules/test-pattern`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pattern, matchType, testStrings }),
-            credentials: 'include',
           },
         );
         if (!response.ok) throw new Error('Failed to test pattern');
@@ -236,7 +230,7 @@ export function useCustomRules() {
         setIsLoading(false);
       }
     },
-    [API_BASE],
+    [],
   );
 
   /**
@@ -255,13 +249,12 @@ export function useCustomRules() {
     ) => {
       try {
         setIsLoading(true);
-        const response = await fetch(
-          `${API_BASE}/classification-rules/bulk-apply`,
+        const response = await authFetch(
+          `/classification-rules/bulk-apply`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ rules: rulesData, overwrite }),
-            credentials: 'include',
           },
         );
         if (!response.ok) throw new Error('Failed to bulk apply rules');
@@ -277,7 +270,7 @@ export function useCustomRules() {
         setIsLoading(false);
       }
     },
-    [API_BASE, fetchRules],
+    [fetchRules],
   );
 
   /**
@@ -286,8 +279,7 @@ export function useCustomRules() {
   const exportRules = useCallback(async () => {
     try {
       setIsLoading(true);
-      const response = await fetch(`${API_BASE}/classification-rules/export`, {
-        credentials: 'include',
+      const response = await authFetch(`/classification-rules/export`, {
       });
       if (!response.ok) throw new Error('Failed to export rules');
       const data = await response.json();
@@ -300,7 +292,7 @@ export function useCustomRules() {
     } finally {
       setIsLoading(false);
     }
-  }, [API_BASE]);
+  }, []);
 
   /**
    * Share rules with others
@@ -313,8 +305,8 @@ export function useCustomRules() {
     ) => {
       try {
         setIsLoading(true);
-        const response = await fetch(
-          `${API_BASE}/classification-rules/share`,
+        const response = await authFetch(
+          `/classification-rules/share`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -323,7 +315,6 @@ export function useCustomRules() {
               description,
               isPublic,
             }),
-            credentials: 'include',
           },
         );
         if (!response.ok) throw new Error('Failed to share rules');
@@ -338,7 +329,7 @@ export function useCustomRules() {
         setIsLoading(false);
       }
     },
-    [API_BASE],
+    [],
   );
 
   /**
@@ -347,8 +338,7 @@ export function useCustomRules() {
   const fetchStats = useCallback(async () => {
     try {
       setIsLoading(true);
-      const response = await fetch(`${API_BASE}/classification-rules/stats`, {
-        credentials: 'include',
+      const response = await authFetch(`/classification-rules/stats`, {
       });
       if (!response.ok) throw new Error('Failed to fetch stats');
       const data = await response.json();
@@ -360,7 +350,7 @@ export function useCustomRules() {
     } finally {
       setIsLoading(false);
     }
-  }, [API_BASE]);
+  }, []);
 
   return {
     rules,

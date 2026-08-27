@@ -141,6 +141,7 @@ export default function DespesasPage() {
     createExpense,
     updateExpense,
     deleteExpense,
+    setExpensePaid,
     clearError,
   } = useExpenses();
 
@@ -156,6 +157,34 @@ export default function DespesasPage() {
 
   // Confirmação inline de exclusão — sem `window.confirm`
   const [confirmingDeletionId, setConfirmingDeletionId] = useState<string | null>(null);
+
+  /** Id da despesa cujo ícone de pagamento está sendo alternado agora. */
+  const [alterandoPagamentoId, setAlterandoPagamentoId] = useState<string | null>(
+    null,
+  );
+
+  /**
+   * Alterna a situação de pagamento pelo ícone da lista.
+   *
+   * O estado de "salvando" é por linha, e não global: com um único indicador,
+   * clicar em uma despesa desabilitaria o ícone de todas as outras.
+   */
+  const handleTogglePago = async (expense: Expense) => {
+    setAlterandoPagamentoId(expense.id);
+    setFeedback(null);
+    try {
+      await setExpensePaid(expense.id, !expense.isPaid);
+      setFeedback(
+        expense.isPaid
+          ? `"${expense.description}" voltou para pendente.`
+          : `"${expense.description}" marcada como paga.`,
+      );
+    } catch {
+      // A mensagem já vem pelo `error` do hook.
+    } finally {
+      setAlterandoPagamentoId(null);
+    }
+  };
 
   // Filtros
   const [filtroCategoria, setFiltroCategoria] = useState('');
@@ -1043,6 +1072,18 @@ export default function DespesasPage() {
                       </option>
                     ))}
                   </select>
+
+                  <p className="mt-3 flex items-start gap-2 rounded bg-indigo-50 dark:bg-indigo-950/30 p-3 text-xs text-indigo-800 dark:text-indigo-200">
+                    <Repeat className="w-4 h-4 shrink-0 mt-px" />
+                    <span>
+                      A próxima ocorrência entra sozinha no{' '}
+                      <Link href="/planned" className="underline font-medium">
+                        Planejado
+                      </Link>
+                      . Não é preciso cadastrá-la lá de novo — se já existir uma
+                      conta igual para o mesmo vencimento, nada é duplicado.
+                    </span>
+                  </p>
                 </div>
               )}
             </div>
@@ -1181,6 +1222,39 @@ export default function DespesasPage() {
                 className="rounded-lg border border-gray-200 dark:border-gray-700 p-4"
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    {/*
+                      Ícone selecionável de pagamento. É um botão de verdade, com
+                      `aria-pressed`, para funcionar por teclado e leitor de tela
+                      — um ícone clicável em `<div>` não é alcançável por Tab.
+                    */}
+                    <button
+                      type="button"
+                      onClick={() => handleTogglePago(expense)}
+                      disabled={alterandoPagamentoId === expense.id}
+                      aria-pressed={expense.isPaid}
+                      title={
+                        expense.isPaid
+                          ? `Paga em ${formatDateBR(expense.paidAt || expense.date)} — clique para voltar a pendente`
+                          : 'Marcar como paga'
+                      }
+                      className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-colors disabled:opacity-50 ${
+                        expense.isPaid
+                          ? 'border-green-500 bg-green-500 text-white hover:bg-green-600'
+                          : 'border-gray-300 dark:border-gray-600 text-gray-400 hover:border-green-500 hover:text-green-600'
+                      }`}
+                    >
+                      {alterandoPagamentoId === expense.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Check className="w-4 h-4" />
+                      )}
+                      <span className="sr-only">
+                        {expense.isPaid
+                          ? 'Marcar como não paga'
+                          : 'Marcar como paga'}
+                      </span>
+                    </button>
                   <div className="min-w-0">
                     <p className="font-semibold text-gray-900 dark:text-white truncate">
                       {expense.description}
@@ -1198,6 +1272,25 @@ export default function DespesasPage() {
                       </span>
                       <span className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
                         {formatDateBR(expense.date)}
+                      </span>
+                      <span
+                        className={`px-2 py-1 rounded flex items-center gap-1 ${
+                          expense.isPaid
+                            ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200'
+                            : 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200'
+                        }`}
+                      >
+                        {expense.isPaid ? (
+                          <>
+                            <Check className="w-3 h-3" />
+                            Paga
+                            {expense.paidAt
+                              ? ` em ${formatDateBR(expense.paidAt)}`
+                              : ''}
+                          </>
+                        ) : (
+                          'Pendente'
+                        )}
                       </span>
                       <span className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 capitalize">
                         {expense.responsible}
@@ -1236,6 +1329,7 @@ export default function DespesasPage() {
                         {expense.observation}
                       </p>
                     )}
+                  </div>
                   </div>
 
                   <div className="flex items-center gap-3">

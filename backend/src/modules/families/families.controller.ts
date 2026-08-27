@@ -60,6 +60,25 @@ export class FamiliesController {
   }
 
   /**
+   * POST /families/join
+   *
+   * O usuário autenticado entra na família de outra pessoa, informando o e-mail
+   * dela. É o caminho que faltava: sem ele, dois usuários cadastrados
+   * separadamente — cada um sozinho na própria família automática — nunca
+   * conseguiam formar uma casa só.
+   *
+   * Rota estática: precisa vir antes de `:familyId`.
+   */
+  @Post('join')
+  @HttpCode(HttpStatus.OK)
+  async join(
+    @CurrentUser() user: User,
+    @Body() dto: AddFamilyMemberDto,
+  ): Promise<FamilyDto> {
+    return this.familiesService.joinFamilyOf(user.id, dto.email);
+  }
+
+  /**
    * GET /families/:familyId
    */
   @Get(':familyId')

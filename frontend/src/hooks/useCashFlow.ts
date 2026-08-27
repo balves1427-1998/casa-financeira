@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { apiClient } from '../lib/api';
 import {
   CashFlowMonthDto,
   CashFlowSummaryDto,
@@ -6,14 +7,41 @@ import {
   GetBestDayToShopDto,
 } from '../types/cash-flow';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-
+/**
+ * Hook do Fluxo de Caixa.
+ *
+ * CORREÇÃO: a versão anterior chamava `fetch` direto com
+ * `credentials: 'include'`, esperando um cookie de sessão. Esta API autentica
+ * por JWT no header `Authorization` — o cookie nunca existiu. Toda chamada
+ * voltava 401 e a tela mostrava "erro ao carregar dados / Failed to fetch cash
+ * flow:" sem indicar a causa.
+ *
+ * Passando pelo `apiClient` (axios), o token entra pelo interceptor, o 401
+ * redireciona para o login em vez de virar texto de erro, e a mensagem
+ * apresentada ao usuário passa a ser a do backend, em português.
+ */
 interface UseCashFlowState {
   monthData: CashFlowMonthDto | null;
   summary: CashFlowSummaryDto | null;
   bestDayRecommendation: BestDayToShopDto | null;
   isLoading: boolean;
   error: string | null;
+}
+
+/** Extrai a mensagem do backend; cai para um texto legível se não houver. */
+function mensagemDeErro(err: unknown, fallback: string): string {
+  const resposta = (err as { response?: { data?: { message?: unknown } } })
+    ?.response?.data?.message;
+
+  if (Array.isArray(resposta)) {
+    return resposta.join(', ');
+  }
+
+  if (typeof resposta === 'string') {
+    return resposta;
+  }
+
+  return fallback;
 }
 
 export function useCashFlow() {
@@ -25,40 +53,21 @@ export function useCashFlow() {
     error: null,
   });
 
-  /**
-   * Fetch cash flow for a specific month
-   */
+  /** Fluxo de caixa de um mês específico. */
   const fetchMonthCashFlow = useCallback(
     async (month: number, year: number) => {
-      setState(prev => ({ ...prev, isLoading: true, error: null }));
+      setState((prev) => ({ ...prev, isLoading: true, error: null }));
       try {
-        const response = await fetch(
-          `${API_BASE_URL}/cash-flow/${month}/${year}`,
-          {
-            credentials: 'include',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-          },
-        );
-
-        if (!response.ok) {
-          throw new Error(`Failed to fetch cash flow: ${response.statusText}`);
-        }
-
-        const data: CashFlowMonthDto = await response.json();
-        setState(prev => ({
-          ...prev,
-          monthData: data,
-          isLoading: false,
-        }));
-        return data;
+        const data = await apiClient.getCashFlowMonth(month, year);
+        setState((prev) => ({ ...prev, monthData: data, isLoading: false }));
+        return data as CashFlowMonthDto;
       } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : 'Unknown error occurred';
-        setState(prev => ({
+        setState((prev) => ({
           ...prev,
-          error: errorMessage,
+          error: mensagemDeErro(
+            err,
+            'Não foi possível carregar o fluxo de caixa do mês.',
+          ),
           isLoading: false,
         }));
         throw err;
@@ -67,36 +76,50 @@ export function useCashFlow() {
     [],
   );
 
-  /**
-   * Fetch current month summary
-   */
+  /** Resumo do mês corrente. */
   const fetchSummary = useCallback(async () => {
-    setState(prev => ({ ...prev, isLoading: true, error: null }));
+    setState((prev) => ({ ...prev, isLoading: true, error: null }));
     try {
-      const response = await fetch(`${API_BASE_URL}/cash-flow/summary/current`, {
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch summary: ${response.statusText}`);
-      }
-
-      const data: CashFlowSummaryDto = await response.json();
-      setState(prev => ({
+      const data = await apiClient.getCashFlowSummary();
+      setState((prev) => ({ ...prev, summary: data, isLoading: false }));
+      return data as CashFlowSummaryDto;
+    } catch (err) {
+      setState((prev) => ({
         ...prev,
-        summary: data,
+        error: mensagemDeErro(
+          err,
+          'Não foi possível carregar o resumo do fluxo de caixa.',
+        ),
         isLoading: false,
       }));
-      return data;
-    } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : 'Unknown error occurred';
-      setState(prev => ({
+      throw err;
+    }
+  }, []);
+
+  /** Recomendação de melhor dia para comprar. */
+  const getBestDayToShop = useCallback(async (dto: GetBestDayToShopDto) => {
+    setState((prev) => ({ ...prev, isLoading: true, error: null }));
+    try {
+      const data = await apiClient.getCashFlowBestDay({
+        desiredAmount: dto.desiredAmount,
+        startDate: dto.startDate?.toISOString(),
+        endDate: dto.endDate?.toISOString(),
+        minimumBalanceThreshold: dto.minimumBalanceThreshold,
+        onlyLowRisk: dto.onlyLowRisk,
+      });
+      setState((prev) => ({
         ...prev,
-        error: errorMessage,
+        bestDayRecommendation: data,
+        isLoading: false,
+      }));
+      return data as BestDayToShopDto;
+    } catch (err) {
+      setState((prev) => ({
+        ...prev,
+        error: mensagemDeErro(
+          err,
+          'Não foi possível calcular o melhor dia para a compra.',
+        ),
         isLoading: false,
       }));
       throw err;
@@ -104,61 +127,16 @@ export function useCashFlow() {
   }, []);
 
   /**
-   * Get recommendation for best day to shop
-   */
-  const getBestDayToShop = useCallback(
-    async (dto: GetBestDayToShopDto) => {
-      setState(prev => ({ ...prev, isLoading: true, error: null }));
-      try {
-        const response = await fetch(`${API_BASE_URL}/cash-flow/best-day`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            desiredAmount: dto.desiredAmount,
-            startDate: dto.startDate?.toISOString(),
-            endDate: dto.endDate?.toISOString(),
-            minimumBalanceThreshold: dto.minimumBalanceThreshold,
-            onlyLowRisk: dto.onlyLowRisk,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error(
-            `Failed to get best day recommendation: ${response.statusText}`,
-          );
-        }
-
-        const data: BestDayToShopDto = await response.json();
-        setState(prev => ({
-          ...prev,
-          bestDayRecommendation: data,
-          isLoading: false,
-        }));
-        return data;
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : 'Unknown error occurred';
-        setState(prev => ({
-          ...prev,
-          error: errorMessage,
-          isLoading: false,
-        }));
-        throw err;
-      }
-    },
-    [],
-  );
-
-  /**
-   * Auto-load current month data on mount
+   * Carga inicial.
+   *
+   * As promessas são resolvidas com `catch` vazio de propósito: o estado de
+   * erro já foi preenchido dentro de cada função, e deixar a rejeição escapar
+   * de um `useEffect` derruba o componente com "unhandled rejection".
    */
   useEffect(() => {
     const now = new Date();
-    fetchMonthCashFlow(now.getMonth() + 1, now.getFullYear());
-    fetchSummary();
+    fetchMonthCashFlow(now.getMonth() + 1, now.getFullYear()).catch(() => {});
+    fetchSummary().catch(() => {});
   }, [fetchMonthCashFlow, fetchSummary]);
 
   return {

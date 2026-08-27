@@ -183,7 +183,34 @@ export function useFamily() {
   );
 
   /**
-   * Remove um membro. O backend recusa (400) a remoção do último membro.
+   * Entra na família de outra pessoa, informando o e-mail dela.
+   *
+   * É o caminho para juntar duas contas criadas separadamente: cada cadastro
+   * novo nasce com a própria família automática, e `addMember` sozinho não
+   * resolvia — quem convida precisa que o convidado esteja sem família.
+   */
+  const joinFamily = useCallback(async (email: string) => {
+    setState(prev => ({ ...prev, isSaving: true, error: null }));
+    try {
+      const family = await apiClient.joinFamily(email.trim());
+      setState(prev => ({
+        ...prev,
+        family,
+        members: family.members ?? [],
+        hasFamily: true,
+        isSaving: false,
+      }));
+      return family;
+    } catch (err) {
+      const errorMsg = getApiErrorMessage(err, 'Erro ao entrar na família');
+      setState(prev => ({ ...prev, error: errorMsg, isSaving: false }));
+      throw err;
+    }
+  }, []);
+
+  /**
+   * Remove um membro. Uma família que fica sem membros é desativada pelo
+   * backend — nenhum lançamento é perdido, porque todos pertencem ao usuário.
    */
   const removeMember = useCallback(
     async (memberId: string, familyId?: string) => {
@@ -235,6 +262,7 @@ export function useFamily() {
     createFamily,
     updateFamily,
     addMember,
+    joinFamily,
     removeMember,
     clearError,
   };

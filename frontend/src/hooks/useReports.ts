@@ -8,8 +8,7 @@ import {
   SaveAsTemplateDto,
   ReportTemplate,
 } from '@/types/reports';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+import { authFetch } from '../lib/api';
 
 interface UseReportsState {
   reports: ReportDto[];
@@ -35,11 +34,10 @@ export function useReports() {
   const generateReport = useCallback(async (dto: GenerateReportDto) => {
     setState(prev => ({ ...prev, isGenerating: true, error: null }));
     try {
-      const response = await fetch(`${API_BASE}/reports/generate`, {
+      const response = await authFetch(`/reports/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
         body: JSON.stringify(dto),
       });
@@ -66,9 +64,8 @@ export function useReports() {
   const getReport = useCallback(async (reportId: string) => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     try {
-      const response = await fetch(`${API_BASE}/reports/${reportId}`, {
+      const response = await authFetch(`/reports/${reportId}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
       });
 
@@ -97,9 +94,8 @@ export function useReports() {
       params.append('limit', limit.toString());
       params.append('offset', offset.toString());
 
-      const response = await fetch(`${API_BASE}/reports?${params}`, {
+      const response = await authFetch(`/reports?${params}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
       });
 
@@ -123,11 +119,10 @@ export function useReports() {
 
   const sendReport = useCallback(async (reportId: string, dto: SendReportDto) => {
     try {
-      const response = await fetch(`${API_BASE}/reports/${reportId}/send`, {
+      const response = await authFetch(`/reports/${reportId}/send`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
         body: JSON.stringify(dto),
       });
@@ -160,11 +155,10 @@ export function useReports() {
 
   const saveAsTemplate = useCallback(async (reportId: string, dto: SaveAsTemplateDto) => {
     try {
-      const response = await fetch(`${API_BASE}/reports/${reportId}/template`, {
+      const response = await authFetch(`/reports/${reportId}/template`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
         body: JSON.stringify(dto),
       });
@@ -188,9 +182,8 @@ export function useReports() {
   const getTemplates = useCallback(async () => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     try {
-      const response = await fetch(`${API_BASE}/reports/templates/list`, {
+      const response = await authFetch(`/reports/templates/list`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
       });
 
@@ -214,10 +207,9 @@ export function useReports() {
 
   const deleteReport = useCallback(async (reportId: string) => {
     try {
-      const response = await fetch(`${API_BASE}/reports/${reportId}`, {
+      const response = await authFetch(`/reports/${reportId}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
       });
 

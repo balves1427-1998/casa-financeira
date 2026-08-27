@@ -167,7 +167,11 @@ export class AnalyticsService {
     // Get current month expenses
     const currentExpenses = await this.expenseRepo
       .createQueryBuilder('expense')
-      .leftJoinAndSelect('expense.category', 'category')
+      // `expense.category` é uma coluna de texto, não uma relação. O
+      // `leftJoinAndSelect` que estava aqui fazia o TypeORM lançar "Relation
+      // with property path category in entity was not found" — ou seja,
+      // `/analytics/anomalies` e `/analytics/summary` respondiam 500 desde
+      // sempre, para qualquer usuário com um lançamento no mês.
       .where('expense.userId = :userId', { userId })
       .andWhere('EXTRACT(MONTH FROM expense.date) = :month', { month })
       .andWhere('EXTRACT(YEAR FROM expense.date) = :year', { year })
@@ -717,29 +721,78 @@ export class AnalyticsService {
       .slice(0, 5);
   }
 
+  /**
+   * Total gasto em cada um dos últimos `quantidade` meses, do mais antigo para
+   * o mais recente. O índice 0 é o mês mais antigo; o último é `month/year`.
+   *
+   * ESTE MÉTODO EXISTE PARA MATAR UMA RECURSÃO INFINITA.
+   * ---------------------------------------------------
+   * `getHistoricalComparison` e `calculateDeviationFromAverage` chamavam
+   * `calculateSpendingPattern` num laço que começava em `i = 0` — ou seja, o
+   * PRÓPRIO mês que estava sendo calculado, com argumentos idênticos. Como
+   * `calculateSpendingPattern` chama as duas de volta, a única saída era o mês
+   * não ter nenhum lançamento (o `return` antecipado do padrão vazio).
+   *
+   * Na prática: bastava existir UMA despesa no mês corrente para
+   * `/analytics/summary` e `/analytics/spending-pattern` nunca responderem. A
+   * tela ficava carregando até o navegador desistir.
+   *
+   * Uma única consulta agregada resolve os doze meses de uma vez, sem recursão
+   * e sem as 19 idas ao banco por mês que o laço original fazia.
+   */
+  private async getTotaisMensais(
+    userId: string,
+    month: number,
+    year: number,
+    quantidade: number,
+    categoryId?: string,
+  ): Promise<number[]> {
+    const inicio = new Date(year, month - quantidade, 1);
+    // Primeiro instante do mês seguinte: pega o mês de referência inteiro sem
+    // depender de quantos dias ele tem.
+    const fim = new Date(year, month, 1);
+
+    const query = this.expenseRepo
+      .createQueryBuilder('expense')
+      .select("TO_CHAR(expense.date, 'YYYY-MM')", 'competencia')
+      .addSelect('COALESCE(SUM(expense.amount), 0)', 'total')
+      .where('expense.userId = :userId', { userId })
+      .andWhere('expense.date >= :inicio', { inicio })
+      .andWhere('expense.date < :fim', { fim });
+
+    if (categoryId) {
+      query.andWhere('expense.category = :categoryId', { categoryId });
+    }
+
+    const linhas = await query.groupBy('competencia').getRawMany();
+
+    const porCompetencia = new Map<string, number>(
+      linhas.map((linha) => [linha.competencia, Number(linha.total) || 0]),
+    );
+
+    const totais: number[] = [];
+    for (let i = quantidade - 1; i >= 0; i--) {
+      const data = new Date(year, month - 1 - i, 1);
+      const chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`;
+      totais.push(porCompetencia.get(chave) ?? 0);
+    }
+
+    return totais;
+  }
+
   private async getHistoricalComparison(
     userId: string,
     month: number,
     year: number,
     categoryId?: string,
   ) {
-    const months = [3, 6, 12];
+    const doze = await this.getTotaisMensais(userId, month, year, 12, categoryId);
+
     const data: { [key: string]: number[] } = {
-      last3Months: [],
-      last6Months: [],
-      last12Months: [],
+      last3Months: doze.slice(-3),
+      last6Months: doze.slice(-6),
+      last12Months: doze,
     };
-
-    for (let i = 0; i < 12; i++) {
-      const date = new Date(year, month - 1 - i, 1);
-      const m = date.getMonth() + 1;
-      const y = date.getFullYear();
-
-      const pattern = await this.calculateSpendingPattern(userId, m, y, categoryId);
-      if (i < 3) data.last3Months.unshift(pattern.totalSpent);
-      if (i < 6) data.last6Months.unshift(pattern.totalSpent);
-      if (i < 12) data.last12Months.unshift(pattern.totalSpent);
-    }
 
     const lastAmount = data.last3Months[data.last3Months.length - 1];
     const firstAmount = data.last3Months[0];
@@ -765,14 +818,21 @@ export class AnalyticsService {
     currentTotal: number,
     categoryId?: string,
   ): Promise<number> {
-    const prevDate = new Date(year, month - 2, 1);
-    const prevMonth = prevDate.getMonth() + 1;
-    const prevYear = prevDate.getFullYear();
+    // Dois meses agregados numa consulta só: [mês anterior, mês atual].
+    // Chamar `calculateSpendingPattern` aqui reabria a recursão descrita em
+    // `getTotaisMensais` — o padrão completo do mês anterior é muito mais do
+    // que este cálculo precisa.
+    const [anterior] = await this.getTotaisMensais(
+      userId,
+      month,
+      year,
+      2,
+      categoryId,
+    );
 
-    const prevPattern = await this.calculateSpendingPattern(userId, prevMonth, prevYear, categoryId);
-    if (prevPattern.totalSpent === 0) return 0;
+    if (!anterior) return 0;
 
-    return ((currentTotal - prevPattern.totalSpent) / prevPattern.totalSpent) * 100;
+    return ((currentTotal - anterior) / anterior) * 100;
   }
 
   private async calculateDeviationFromAverage(
@@ -782,19 +842,8 @@ export class AnalyticsService {
     currentTotal: number,
     categoryId?: string,
   ): Promise<number> {
-    let total = 0;
-    let count = 0;
-
-    for (let i = 0; i < 6; i++) {
-      const date = new Date(year, month - 1 - i, 1);
-      const m = date.getMonth() + 1;
-      const y = date.getFullYear();
-      const pattern = await this.calculateSpendingPattern(userId, m, y, categoryId);
-      total += pattern.totalSpent;
-      count++;
-    }
-
-    const average = total / count;
+    const seis = await this.getTotaisMensais(userId, month, year, 6, categoryId);
+    const average = seis.reduce((soma, valor) => soma + valor, 0) / seis.length;
     if (average === 0) return 0;
 
     return ((currentTotal - average) / average) * 100;
