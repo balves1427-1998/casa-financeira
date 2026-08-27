@@ -648,7 +648,7 @@ export default function RelatoriosPage() {
                     Receitas
                   </Link>{' '}
                   ou{' '}
-                  <Link href="/expenses" className="underline font-medium">
+                  <Link href="/despesas" className="underline font-medium">
                     Despesas
                   </Link>{' '}
                   para que o relatório passe a ter conteúdo.

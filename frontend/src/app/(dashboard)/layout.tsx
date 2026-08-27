@@ -31,15 +31,15 @@ export default function DashboardLayout({ children }: LayoutProps) {
 
   const navigationItems = [
     { label: 'Dashboard', href: '/dashboard', icon: '📊' },
-    { label: 'Despesas', href: '/expenses', icon: '💸' },
+    { label: 'Despesas', href: '/despesas', icon: '💸' },
     { label: 'Receitas', href: '/receitas', icon: '💰' },
-    { label: 'Contas', href: '/accounts', icon: '🏦' },
+    { label: 'Contas', href: '/contas', icon: '🏦' },
     { label: 'Categorias', href: '/categories', icon: '📂' },
     { label: 'Cartões', href: '/cards', icon: '💳' },
     { label: 'Planejado', href: '/planned', icon: '📋' },
     { label: 'Metas', href: '/metas', icon: '🎯' },
     { label: 'Divisão', href: '/divisao', icon: '⚖️' },
-    { label: 'Fluxo de Caixa', href: '/cashflow', icon: '📈' },
+    { label: 'Fluxo de Caixa', href: '/cash-flow', icon: '📈' },
     { label: 'Relatórios', href: '/relatorios', icon: '📄' },
     { label: 'Inteligência Financeira', href: '/ai', icon: '🤖' },
     { label: 'Família', href: '/familia', icon: '👨‍👩‍👧' },

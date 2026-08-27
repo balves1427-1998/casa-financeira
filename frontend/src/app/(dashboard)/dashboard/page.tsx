@@ -101,7 +101,10 @@ export default function DashboardPage() {
       }
     };
 
-    if (!authLoading && !accountsLoading && accounts.length > 0) {
+    // Precisa rodar mesmo sem contas cadastradas: é `calculateKPIs` que desliga
+    // o estado de carregamento, então exigir `accounts.length > 0` prendia todo
+    // usuário recém-cadastrado num spinner infinito.
+    if (!authLoading && !accountsLoading) {
       calculateKPIs();
     }
   }, [authLoading, accountsLoading, accounts, expenses, incomes]);
@@ -286,7 +289,7 @@ export default function DashboardPage() {
           </h2>
         </Card.Header>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-4">
-          <Link href="/expenses/new">
+          <Link href="/despesas">
             <Button variant="primary" className="w-full">
               ➕ Nova Despesa
             </Button>
@@ -296,12 +299,12 @@ export default function DashboardPage() {
               ➕ Nova Receita
             </Button>
           </Link>
-          <Link href="/expenses">
+          <Link href="/despesas">
             <Button variant="secondary" className="w-full">
               📊 Ver Despesas
             </Button>
           </Link>
-          <Link href="/accounts">
+          <Link href="/contas">
             <Button variant="secondary" className="w-full">
               🏦 Contas
             </Button>
@@ -344,7 +347,7 @@ export default function DashboardPage() {
               Nenhuma conta cadastrada. Crie uma para começar!
             </p>
           )}
-          <Link href="/accounts/new">
+          <Link href="/contas">
             <Button variant="secondary" className="w-full">
               ➕ Adicionar Conta
             </Button>

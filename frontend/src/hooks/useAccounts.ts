@@ -1,7 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api';
+import {
+  CreateAccountDto,
+  UpdateAccountDto,
+  toAccountAmount,
+} from '@/types/account';
+import { getApiErrorMessage } from '@/utils/api-error';
 
 export interface Account {
   id: string;
@@ -17,107 +23,171 @@ export interface Account {
   updatedAt: string;
 }
 
+/**
+ * Normaliza um registro vindo da API.
+ *
+ * As colunas `decimal` do PostgreSQL chegam como STRING pelo driver `pg`
+ * (`"3000.00"`), mas a interface promete `balance: number`. Sem a conversão,
+ * `balance.toLocaleString('pt-BR', …)` cai no método de String e devolve
+ * "3000.00" — sem separador de milhar e fora do padrão brasileiro.
+ */
+function normalizeAccount(raw: any): Account {
+  return {
+    ...raw,
+    balance: toAccountAmount(raw?.balance),
+    initialBalance: toAccountAmount(raw?.initialBalance),
+    limit:
+      raw?.limit === null || raw?.limit === undefined
+        ? undefined
+        : toAccountAmount(raw.limit),
+    closingDay:
+      raw?.closingDay === null || raw?.closingDay === undefined
+        ? undefined
+        : Number(raw.closingDay),
+    dueDay:
+      raw?.dueDay === null || raw?.dueDay === undefined
+        ? undefined
+        : Number(raw.dueDay),
+  } as Account;
+}
+
 export const useAccounts = () => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [totalBalance, setTotalBalance] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  /** `true` durante criação, edição ou exclusão — separado da carga da lista. */
+  const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Fetch all accounts
-  const fetchAccounts = async () => {
+  const fetchAccounts = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
       const data = await apiClient.getAccounts();
-      setAccounts(data);
+      const normalized: Account[] = Array.isArray(data) ? data.map(normalizeAccount) : [];
+      setAccounts(normalized);
+      return normalized;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch accounts');
+      setError(getApiErrorMessage(err, 'Erro ao carregar as contas'));
       console.error('Error fetching accounts:', err);
+      return [] as Account[];
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   // Fetch total balance
-  const fetchTotalBalance = async () => {
+  const fetchTotalBalance = useCallback(async () => {
     try {
       const data = await apiClient.getTotalBalance();
-      setTotalBalance(data.totalBalance);
+      setTotalBalance(toAccountAmount(data?.totalBalance));
     } catch (err) {
       console.error('Error fetching total balance:', err);
     }
-  };
+  }, []);
+
+  /** Recarrega a lista e o saldo consolidado (somado no backend). */
+  const refreshAll = useCallback(async () => {
+    await Promise.all([
+      fetchAccounts().catch(() => undefined),
+      fetchTotalBalance().catch(() => undefined),
+    ]);
+  }, [fetchAccounts, fetchTotalBalance]);
 
   // Create account
-  const createAccount = async (accountData: any) => {
-    try {
-      setError(null);
-      const newAccount = await apiClient.createAccount(accountData);
-      setAccounts([...accounts, newAccount]);
-      await fetchTotalBalance();
-      return newAccount;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to create account';
-      setError(errorMessage);
-      throw err;
-    }
-  };
+  const createAccount = useCallback(
+    async (accountData: CreateAccountDto | any) => {
+      try {
+        setIsSaving(true);
+        setError(null);
+        const created = normalizeAccount(await apiClient.createAccount(accountData));
+        setAccounts((prev) => [created, ...prev]);
+        await fetchTotalBalance();
+        return created;
+      } catch (err) {
+        const errorMessage = getApiErrorMessage(err, 'Erro ao cadastrar a conta');
+        setError(errorMessage);
+        throw new Error(errorMessage);
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [fetchTotalBalance],
+  );
 
   // Update account
-  const updateAccount = async (id: string, updateData: any) => {
-    try {
-      setError(null);
-      const updated = await apiClient.updateAccount(id, updateData);
-      setAccounts(accounts.map((acc) => (acc.id === id ? updated : acc)));
-      await fetchTotalBalance();
-      return updated;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to update account';
-      setError(errorMessage);
-      throw err;
-    }
-  };
+  const updateAccount = useCallback(
+    async (id: string, updateData: UpdateAccountDto | any) => {
+      try {
+        setIsSaving(true);
+        setError(null);
+        const updated = normalizeAccount(await apiClient.updateAccount(id, updateData));
+        setAccounts((prev) => prev.map((acc) => (acc.id === id ? updated : acc)));
+        await fetchTotalBalance();
+        return updated;
+      } catch (err) {
+        const errorMessage = getApiErrorMessage(err, 'Erro ao atualizar a conta');
+        setError(errorMessage);
+        throw new Error(errorMessage);
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [fetchTotalBalance],
+  );
 
   // Delete account
-  const deleteAccount = async (id: string) => {
-    try {
-      setError(null);
-      await apiClient.deleteAccount(id);
-      setAccounts(accounts.filter((acc) => acc.id !== id));
-      await fetchTotalBalance();
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to delete account';
-      setError(errorMessage);
-      throw err;
-    }
-  };
+  const deleteAccount = useCallback(
+    async (id: string) => {
+      try {
+        setIsSaving(true);
+        setError(null);
+        await apiClient.deleteAccount(id);
+        setAccounts((prev) => prev.filter((acc) => acc.id !== id));
+        await fetchTotalBalance();
+        return true;
+      } catch (err) {
+        const errorMessage = getApiErrorMessage(err, 'Erro ao excluir a conta');
+        setError(errorMessage);
+        throw new Error(errorMessage);
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [fetchTotalBalance],
+  );
 
   // Get account by ID
-  const getAccount = async (id: string) => {
+  const getAccount = useCallback(async (id: string) => {
     try {
-      return await apiClient.getAccount(id);
+      return normalizeAccount(await apiClient.getAccount(id));
     } catch (err) {
       console.error('Error fetching account:', err);
       throw err;
     }
-  };
+  }, []);
+
+  const clearError = useCallback(() => setError(null), []);
 
   // Initial fetch
   useEffect(() => {
-    fetchAccounts();
-    fetchTotalBalance();
-  }, []);
+    refreshAll();
+  }, [refreshAll]);
 
   return {
     accounts,
     totalBalance,
     isLoading,
+    isSaving,
     error,
     fetchAccounts,
     fetchTotalBalance,
+    refreshAll,
     createAccount,
     updateAccount,
     deleteAccount,
     getAccount,
+    clearError,
   };
 };
