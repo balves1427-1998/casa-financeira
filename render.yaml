@@ -23,7 +23,10 @@ services:
     plan: free
     region: oregon
     rootDir: backend
-    buildCommand: npm ci && npm run build
+    # `--include=dev` é obrigatório: com NODE_ENV=production (declarado abaixo),
+    # o npm pula as devDependencies — e o `nest`, que compila o projeto, é uma
+    # delas. Sem isso o build falha com "nest: not found".
+    buildCommand: npm ci --include=dev && npm run build
     # As migrations rodam ANTES de subir a aplicação: um deploy com o código
     # novo e o schema antigo quebra em runtime, não no build.
     startCommand: npm run deploy:start

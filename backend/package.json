@@ -4,6 +4,9 @@
   "description": "CFO da Casa - Backend API",
   "author": "Bruno Alves",
   "license": "MIT",
+  "engines": {
+    "node": ">=18 <23"
+  },
   "scripts": {
     "prebuild": "rimraf dist",
     "build": "nest build",
