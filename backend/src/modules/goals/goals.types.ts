@@ -11,8 +11,24 @@ import { Goal, GoalStatus, GoalType } from './entities/goal.entity';
 export interface GoalProgress {
   /** Percentual concluído (0–100), limitado a 100. `null` se o objetivo for zero. */
   progressPercentage: number | null;
+  /** Zero quando o investimento não tem objetivo definido. */
   targetAmount: number;
   currentAmount: number;
+
+  /** Quanto saiu do bolso. */
+  investedAmount: number;
+  /**
+   * Ganho (ou perda) da aplicação: valor atual menos aportado.
+   *
+   * Pode ser negativo — e deve poder. Esconder prejuízo seria mentir sobre o
+   * investimento.
+   */
+  profit: number;
+  /**
+   * Rentabilidade em %, sobre o aportado. `null` quando nada foi aportado:
+   * dividir por zero daria Infinity na tela.
+   */
+  profitPercentage: number | null;
   /** Quanto ainda falta guardar. Nunca negativo. */
   remainingAmount: number;
   isCompleted: boolean;
@@ -70,6 +86,12 @@ export interface GoalsSummary {
   /** Totais consideram metas ativas e concluídas — canceladas ficam de fora. */
   totalTargetAmount: number;
   totalCurrentAmount: number;
+  /** Total aportado do próprio bolso em todos os investimentos. */
+  totalInvestedAmount: number;
+  /** Ganho consolidado: patrimônio atual menos aportado. Pode ser negativo. */
+  totalProfit: number;
+  /** Rentabilidade consolidada em %. `null` quando nada foi aportado. */
+  totalProfitPercentage: number | null;
   totalRemainingAmount: number;
   /** Progresso agregado (acumulado ÷ objetivo). `null` se não houver objetivo. */
   overallProgressPercentage: number | null;

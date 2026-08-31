@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Param,
   Body,
@@ -18,7 +19,11 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetCurrentUser } from '../../common/decorators/get-current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { IncomeService } from './income.service';
-import { CreateIncomeDto, UpdateIncomeDto } from './dtos/income.dto';
+import {
+  CreateIncomeDto,
+  SetIncomeRecurrenceDto,
+  UpdateIncomeDto,
+} from './dtos/income.dto';
 
 /**
  * Controller de Receitas (item 3 do escopo do projeto).
@@ -142,6 +147,22 @@ export class IncomeController {
     @Body() dto: UpdateIncomeDto,
   ) {
     return this.incomeService.update(id, user, dto);
+  }
+
+  /**
+   * Encerra ou retoma a recorrência da receita.
+   *
+   * Cancelar não apaga a receita: ela é dinheiro que entrou. O que termina é a
+   * projeção dos meses seguintes no Planejado.
+   */
+  @Patch(':id/recurrence')
+  @HttpCode(HttpStatus.OK)
+  async setRecurrence(
+    @Param('id') id: string,
+    @GetCurrentUser() user: User,
+    @Body() dto: SetIncomeRecurrenceDto,
+  ) {
+    return this.incomeService.setRecurrenceActive(id, user, dto.active);
   }
 
   @Delete(':id')

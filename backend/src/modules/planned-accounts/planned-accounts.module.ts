@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PlannedAccount } from './entities/planned-account.entity';
+import { Expense } from '../expenses/entities/expense.entity';
+import { Income } from '../income/entities/income.entity';
 import { PlannedAccountsService } from './planned-accounts.service';
 import { PlannedAccountsController } from './planned-accounts.controller';
 import { FamiliesModule } from '../families/families.module';
@@ -15,7 +17,10 @@ import { RecurrenceModule } from '../recurrence/recurrence.module';
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([PlannedAccount]),
+    // `Expense` e `Income` entram pelo repositório: confirmar uma conta
+    // planejada MATERIALIZA o lançamento real, e importar os módulos deles
+    // fecharia um ciclo (ambos já dependem da recorrência).
+    TypeOrmModule.forFeature([PlannedAccount, Expense, Income]),
     FamiliesModule,
     RecurrenceModule,
   ],

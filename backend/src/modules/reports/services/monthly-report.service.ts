@@ -561,7 +561,14 @@ export class MonthlyReportService {
       ),
     );
 
-    const linhas: PlannedAccountLine[] = planos.flat().map((conta) => ({
+    // Só contas a PAGAR: a seção do relatório se chama "contas planejadas" e
+    // soma compromissos. As entradas previstas (salário projetado) entram na
+    // visão geral como receita, não aqui — misturá-las inflaria o total de
+    // contas pendentes da casa com dinheiro que vai ENTRAR.
+    const linhas: PlannedAccountLine[] = planos
+      .flat()
+      .filter((conta) => conta.type !== 'income')
+      .map((conta) => ({
       id: conta.id,
       description: conta.description,
       category: conta.category ?? null,

@@ -53,6 +53,10 @@ export class GoalsService {
     const goal = this.goalRepository.create({
       ...dto,
       currentAmount: dto.currentAmount ?? 0,
+      // Ao cadastrar uma aplicação que já existe, o valor informado é o que se
+      // sabe: tratá-lo como aportado deixa o rendimento em zero até que o
+      // usuário atualize o valor atual. Melhor do que inventar um ganho.
+      investedAmount: dto.investedAmount ?? dto.currentAmount ?? 0,
       userId: user.id,
       familyId: user.familyId,
       status: GoalStatus.ACTIVE,
@@ -60,7 +64,11 @@ export class GoalsService {
 
     // Uma meta já nasce concluída quando o valor atual informado cobre o
     // objetivo (caso comum ao cadastrar uma reserva que já existe).
-    if (this.paraNumero(goal.currentAmount) >= this.paraNumero(goal.targetAmount)) {
+    //
+    // `atingiuObjetivo` exige objetivo MAIOR QUE ZERO. Sem essa guarda, todo
+    // investimento sem valor-alvo — um CDB, por exemplo — nasceria marcado
+    // como concluído, porque qualquer valor é >= 0.
+    if (this.atingiuObjetivo(goal)) {
       goal.status = GoalStatus.COMPLETED;
     }
 
@@ -138,8 +146,17 @@ export class GoalsService {
     }
 
     // `Number()` obrigatório: `currentAmount` chega do banco como string.
-    const acumulado = this.paraNumero(goal.currentAmount);
-    goal.currentAmount = this.arredondar(acumulado + this.paraNumero(dto.amount));
+    const valor = this.paraNumero(dto.amount);
+
+    // O aporte entra nos DOIS números: no valor atual (o dinheiro está lá) e no
+    // aportado (saiu do bolso). É a diferença entre eles que revela rendimento
+    // — se o aporte só somasse no atual, todo depósito viraria "lucro".
+    goal.currentAmount = this.arredondar(
+      this.paraNumero(goal.currentAmount) + valor,
+    );
+    goal.investedAmount = this.arredondar(
+      this.paraNumero(goal.investedAmount) + valor,
+    );
     goal.lastContributionAt = dto.date ?? new Date();
 
     if (this.atingiuObjetivo(goal)) {
@@ -176,6 +193,9 @@ export class GoalsService {
       cancelledGoals: 0,
       totalTargetAmount: 0,
       totalCurrentAmount: 0,
+      totalInvestedAmount: 0,
+      totalProfit: 0,
+      totalProfitPercentage: null,
       totalRemainingAmount: 0,
       overallProgressPercentage: null,
       totalPlannedMonthlyContribution: 0,
@@ -205,6 +225,7 @@ export class GoalsService {
 
       resumo.totalTargetAmount += progresso.targetAmount;
       resumo.totalCurrentAmount += progresso.currentAmount;
+      resumo.totalInvestedAmount += progresso.investedAmount;
       resumo.totalRemainingAmount += progresso.remainingAmount;
 
       if (goal.status !== GoalStatus.ACTIVE) {
@@ -241,6 +262,19 @@ export class GoalsService {
 
     resumo.totalTargetAmount = this.arredondar(resumo.totalTargetAmount);
     resumo.totalCurrentAmount = this.arredondar(resumo.totalCurrentAmount);
+    resumo.totalInvestedAmount = this.arredondar(resumo.totalInvestedAmount);
+
+    // Consolidado do rendimento. Dividir por zero daria Infinity na tela, então
+    // sem aporte a rentabilidade é declarada desconhecida, não zero.
+    resumo.totalProfit = this.arredondar(
+      resumo.totalCurrentAmount - resumo.totalInvestedAmount,
+    );
+    resumo.totalProfitPercentage =
+      resumo.totalInvestedAmount > 0
+        ? this.arredondar(
+            (resumo.totalProfit / resumo.totalInvestedAmount) * 100,
+          )
+        : null;
     resumo.totalRemainingAmount = this.arredondar(resumo.totalRemainingAmount);
     resumo.totalPlannedMonthlyContribution = this.arredondar(
       resumo.totalPlannedMonthlyContribution,
@@ -360,10 +394,18 @@ export class GoalsService {
       cumprePrazo = mesesProjetados <= mesesRestantes;
     }
 
+    // Rendimento: o que a aplicação ganhou além do que foi depositado.
+    const aportado = this.paraNumero(goal.investedAmount);
+    const ganho = this.arredondar(acumulado - aportado);
+
     return {
       progressPercentage: percentual,
       targetAmount: this.arredondar(objetivo),
       currentAmount: this.arredondar(acumulado),
+      investedAmount: this.arredondar(aportado),
+      profit: ganho,
+      profitPercentage:
+        aportado > 0 ? this.arredondar((ganho / aportado) * 100) : null,
       remainingAmount: restante,
       isCompleted: concluida,
       deadline: prazo,
@@ -408,6 +450,7 @@ export class GoalsService {
       ...goal,
       targetAmount: progress.targetAmount,
       currentAmount: progress.currentAmount,
+      investedAmount: progress.investedAmount,
       monthlyContribution: progress.plannedMonthlyContribution ?? undefined,
       deadline: progress.deadline ?? undefined,
       progress,

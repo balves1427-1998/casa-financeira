@@ -188,6 +188,12 @@ describe('AiAssistantService', () => {
     getIncomes: jest.fn(),
     getCurrentBalance: jest.fn(),
     getRecurringExpenses: jest.fn(),
+    // Planejado, cartões e investimentos: o assistente passou a consultá-los.
+    getUpcomingBills: jest.fn(async () => []),
+    getOverdueBills: jest.fn(async () => []),
+    getUpcomingIncomes: jest.fn(async () => []),
+    getCreditCards: jest.fn(async () => []),
+    getInvestments: jest.fn(async () => []),
   };
 
   /**
@@ -748,9 +754,25 @@ describe('AiAssistantService', () => {
       });
     });
 
-    describe('perguntas fora do alcance dos dados lidos', () => {
-      it('deve dizer claramente que não lê contas planejadas nem metas', async () => {
+    /**
+     * O assistente PASSOU a ler Planejado, cartões e investimentos.
+     *
+     * Antes ele classificava essas perguntas como fora de escopo e respondia
+     * "acompanhe nas páginas Planejado e Metas" — recusando-se a consultar
+     * dados que o próprio sistema tinha. O teste que existia aqui fixava esse
+     * comportamento; agora ele fixa o oposto.
+     */
+    describe('perguntas sobre Planejado, cartões e investimentos', () => {
+      it('deve responder sobre contas a vencer com os dados do Planejado', async () => {
         configurarCenarioComDados();
+        mockFinancialData.getOverdueBills.mockResolvedValue([]);
+        mockFinancialData.getUpcomingBills.mockResolvedValue([
+          {
+            description: 'Internet',
+            amount: 120,
+            dueDate: new Date('2026-09-05T00:00:00.000Z'),
+          },
+        ]);
 
         const resultado = await service.processUserQuestion(
           USER_ID,
@@ -758,14 +780,94 @@ describe('AiAssistantService', () => {
           { question: 'Quais contas vencem nos próximos 7 dias?' },
         );
 
-        expect(resultado.answer).toContain('Planejado');
-        expect(resultado.answer).not.toContain('R$');
-        expect(resultado.sources).toEqual([]);
-        // Sem contexto de dados, as sugestões vêm do detector de intenção.
-        expect(resultado.followUpQuestions).toEqual([
-          'Sugestão do detector A',
-          'Sugestão do detector B',
+        expect(resultado.answer).toContain('Internet');
+        expect(resultado.answer).toContain('R$ 120,00');
+        expect(resultado.sources).toContain('planned_accounts');
+      });
+
+      it('deve responder sobre o limite dos cartões', async () => {
+        configurarCenarioComDados();
+        mockFinancialData.getCreditCards.mockResolvedValue([
+          {
+            id: 'card-1',
+            name: 'Nubank',
+            bank: 'Nubank',
+            limit: 5000,
+            used: 900,
+            available: 4100,
+            closingDay: 20,
+            dueDay: 5,
+          },
         ]);
+
+        const resultado = await service.processUserQuestion(
+          USER_ID,
+          FAMILY_ID,
+          { question: 'Qual o limite disponível do meu cartão?' },
+        );
+
+        expect(resultado.answer).toContain('Nubank');
+        expect(resultado.answer).toContain('R$ 4.100,00');
+        expect(resultado.sources).toContain('credit_cards');
+      });
+
+      it('deve deixar claro que investimento não é saldo disponível', async () => {
+        configurarCenarioComDados();
+        mockFinancialData.getInvestments.mockResolvedValue([
+          {
+            name: 'CDB Nubank',
+            institution: 'Nubank',
+            currentAmount: 10500,
+            investedAmount: 10000,
+          },
+        ]);
+
+        const resultado = await service.processUserQuestion(
+          USER_ID,
+          FAMILY_ID,
+          { question: 'Quanto eu tenho investido?' },
+        );
+
+        expect(resultado.answer).toContain('R$ 10.500,00');
+        // O rendimento é a diferença entre atual e aportado — nunca o total.
+        expect(resultado.answer).toContain('R$ 500,00');
+        expect(resultado.answer).toContain('não entra como saldo disponível');
+      });
+    });
+
+    /**
+     * Sem dado suficiente, o assistente PERGUNTA em vez de chutar.
+     *
+     * Um palpite apresentado como resposta é pior do que uma pergunta: o
+     * usuário age sobre um número que ninguém calculou.
+     */
+    describe('perguntas sem informação suficiente', () => {
+      it('deve pedir o valor antes de recomendar o melhor dia de compra', async () => {
+        configurarCenarioComDados();
+
+        const resultado = await service.processUserQuestion(
+          USER_ID,
+          FAMILY_ID,
+          { question: 'Qual o melhor dia para fazer uma compra?' },
+        );
+
+        expect(resultado.needsClarification).toBe(true);
+        expect(resultado.answer).toContain('de quanto é a compra');
+        // Nenhum número inventado na resposta que pede informação.
+        expect(resultado.sources).toEqual([]);
+      });
+
+      it('deve perguntar de volta quando a pergunta é curta demais', async () => {
+        configurarCenarioComDados();
+
+        const resultado = await service.processUserQuestion(
+          USER_ID,
+          FAMILY_ID,
+          { question: 'e agora' },
+        );
+
+        expect(resultado.needsClarification).toBe(true);
+        expect(resultado.answer).toContain('Não consegui identificar');
       });
     });
 

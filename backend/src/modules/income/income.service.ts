@@ -3,6 +3,7 @@ import {
   Logger,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -10,6 +11,7 @@ import { Income } from './entities/income.entity';
 import { User } from '../users/entities/user.entity';
 import { FamiliesService } from '../families/families.service';
 import { CreateIncomeDto, UpdateIncomeDto } from './dtos/income.dto';
+import { RecurrenceService } from '../recurrence/recurrence.service';
 
 /**
  * Service de receitas.
@@ -30,6 +32,7 @@ export class IncomeService {
     @InjectRepository(Income)
     private incomeRepository: Repository<Income>,
     private familiesService: FamiliesService,
+    private recurrenceService: RecurrenceService,
   ) {}
 
   async create(user: User, dto: CreateIncomeDto): Promise<Income> {
@@ -41,7 +44,58 @@ export class IncomeService {
     const saved = await this.incomeRepository.save(income);
     this.logger.log(`Receita ${saved.id} criada por ${user.id}`);
 
+    // Receita recorrente abre uma SÉRIE, igual à despesa: o salário dos
+    // próximos doze meses entra no Planejado como ENTRADA, e a janela é
+    // reabastecida conforme o tempo passa.
+    //
+    // Falhar aqui não pode derrubar o lançamento: o dinheiro que entrou é o
+    // fato, a projeção é derivada dele.
+    if (saved.isRecurring) {
+      try {
+        const userIds = await this.scopeUserIds(user);
+        await this.recurrenceService.sincronizarSerieReceita(saved, userIds);
+      } catch (erro) {
+        this.logger.error(
+          `Não foi possível projetar a série da receita ${saved.id}: ${
+            erro instanceof Error ? erro.message : erro
+          }`,
+        );
+      }
+    }
+
     return saved;
+  }
+
+  /**
+   * Encerra ou retoma a recorrência de uma receita.
+   *
+   * Cancelar não apaga a receita — ela é dinheiro que entrou. O que termina é a
+   * projeção dos meses seguintes: quem trocou de emprego para de ver o salário
+   * antigo caindo no Planejado, sem perder o histórico do que recebeu.
+   */
+  async setRecurrenceActive(
+    id: string,
+    user: User,
+    ativa: boolean,
+  ): Promise<Income> {
+    const income = await this.findOne(id, user);
+
+    this.assertPodeAlterar(income, user);
+
+    if (!income.isRecurring) {
+      throw new BadRequestException(
+        'Esta receita não foi lançada como recorrente.',
+      );
+    }
+
+    if (ativa) {
+      const userIds = await this.scopeUserIds(user);
+      await this.recurrenceService.reativarSerieReceita(income, userIds);
+    } else {
+      await this.recurrenceService.cancelarSerieReceita(income);
+    }
+
+    return this.findOne(id, user);
   }
 
   async findAll(user: User): Promise<Income[]> {

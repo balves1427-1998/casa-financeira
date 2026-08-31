@@ -26,8 +26,16 @@ export class CashFlowDayDto {
   @IsNumber()
   dailyExpenses: number;
 
+  /** Contas a PAGAR previstas para o dia. */
   @IsNumber()
   plannedAccountsAmount: number;
+
+  /**
+   * Entradas previstas para o dia — salário e outras receitas recorrentes.
+   * Somam no saldo projetado, ao contrário de `plannedAccountsAmount`.
+   */
+  @IsNumber()
+  plannedIncomeAmount: number;
 
   @IsNumber()
   closingBalance: number;
@@ -70,6 +78,14 @@ export class CashFlowMonthDto {
 
   @IsNumber()
   totalExpenses: number;
+
+  /** Total de contas a pagar previstas no mês. */
+  @IsNumber()
+  totalPlanned: number;
+
+  /** Total de entradas previstas no mês (salários e demais recorrentes). */
+  @IsNumber()
+  totalPlannedIncome: number;
 
   @IsNumber()
   closingBalance: number;

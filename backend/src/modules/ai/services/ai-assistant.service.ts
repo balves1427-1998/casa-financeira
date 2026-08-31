@@ -68,15 +68,27 @@ type TipoDePergunta =
   | 'CATEGORIA'
   | 'RECEITAS'
   | 'REDUZIR_GASTOS'
+  | 'CONTAS_A_PAGAR'
+  | 'CARTOES'
+  | 'INVESTIMENTOS'
+  | 'PRECISA_ESCLARECER'
   | 'FORA_DE_ESCOPO'
   | 'RESUMO';
 
 /** Resposta montada a partir dos dados, antes de virar `AiMessage`. */
 interface RespostaGerada {
   answer: string;
-  /** Fontes REALMENTE consultadas: 'expenses', 'incomes', 'accounts'. */
+  /** Fontes REALMENTE consultadas: 'expenses', 'incomes', 'accounts'… */
   sources: string[];
   followUpQuestions: string[];
+  /**
+   * Quando `true`, a "resposta" é na verdade uma PERGUNTA de volta.
+   *
+   * Existe para o caso em que os dados não bastam para concluir nada: em vez de
+   * devolver um número genérico ou um "não sei", o assistente pede exatamente o
+   * que falta. Um palpite apresentado como resposta é pior do que uma pergunta.
+   */
+  needsClarification?: boolean;
 }
 
 /**
@@ -154,6 +166,9 @@ export class AiAssistantService {
 
     return {
       answer: savedMessage.answer,
+      // Sinaliza ao cliente que a "resposta" é uma pergunta de volta, para que
+      // a tela possa destacá-la em vez de tratá-la como conclusão.
+      needsClarification: resposta.needsClarification ?? false,
       intent: (savedMessage.intent || 'QUERY') as any,
       confidence: savedMessage.confidence ?? 0.5,
       followUpQuestions: savedMessage.followUpQuestions ?? [],
@@ -328,6 +343,18 @@ export class AiAssistantService {
       case 'REDUZIR_GASTOS':
         return this.responderOndeReduzir(familyId, range, rotulo);
 
+      case 'CONTAS_A_PAGAR':
+        return this.responderContasAPagar(familyId, texto);
+
+      case 'CARTOES':
+        return this.responderCartoes(familyId);
+
+      case 'INVESTIMENTOS':
+        return this.responderInvestimentos(familyId);
+
+      case 'PRECISA_ESCLARECER':
+        return this.pedirEsclarecimento(texto);
+
       case 'FORA_DE_ESCOPO':
         return this.responderForaDeEscopo();
 
@@ -345,9 +372,27 @@ export class AiAssistantService {
     texto: string,
     intentResult: IntentResult,
   ): TipoDePergunta {
-    // Vencimentos, metas e planejamento não são lidos por este serviço.
-    if (/vence|vencimento|conta a pagar|contas a pagar|meta |metas/.test(texto)) {
-      return 'FORA_DE_ESCOPO';
+    // Vencimentos, cartões e investimentos passaram a ser lidos: eram
+    // classificados como fora de escopo mesmo com os dados existindo no
+    // sistema, e o assistente respondia "não sei" sobre a própria base.
+    if (
+      /vence|vencimento|conta a pagar|contas a pagar|contas do mes|a pagar|boleto/.test(
+        texto,
+      )
+    ) {
+      return 'CONTAS_A_PAGAR';
+    }
+
+    if (/cartao|cartoes|fatura|limite/.test(texto)) {
+      return 'CARTOES';
+    }
+
+    if (
+      /investi|aplicac|aplicad|poupanca|caixinha|meta |metas|rendiment|rendeu|cdb|tesouro|acoes|patrimonio/.test(
+        texto,
+      )
+    ) {
+      return 'INVESTIMENTOS';
     }
 
     if (
@@ -406,8 +451,24 @@ export class AiAssistantService {
       return 'RECEITAS';
     }
 
+    // Pedir recomendação de compra SEM dizer o valor não tem resposta honesta:
+    // o mesmo dia é seguro para R$ 200 e arriscado para R$ 3.000. Em vez de
+    // escolher um valor por conta própria, o assistente pergunta.
+    if (
+      /melhor dia|posso comprar|vale a pena comprar/.test(texto) &&
+      !/r\$|\d{3,}/.test(texto)
+    ) {
+      return 'PRECISA_ESCLARECER';
+    }
+
     if (/gast|despesa|compr/.test(texto)) {
       return 'CATEGORIA';
+    }
+
+    // Pergunta curta demais para ser roteada: perguntar de volta é melhor do
+    // que despejar um resumo que ninguém pediu.
+    if (texto.trim().split(/\s+/).length <= 2) {
+      return 'PRECISA_ESCLARECER';
     }
 
     return 'RESUMO';
@@ -1045,4 +1106,218 @@ export class AiAssistantService {
     if (!texto) return texto;
     return texto.charAt(0).toUpperCase() + texto.slice(1);
   }
+
+  /**
+   * Contas a pagar: vencidas primeiro, depois as que estão por vencer.
+   *
+   * O período padrão é 7 dias porque é a pergunta que o usuário costuma fazer
+   * ("o que vence esta semana?"); "próximos 30 dias" e afins são reconhecidos
+   * no texto.
+   */
+  private async responderContasAPagar(
+    familyId: string,
+    texto: string,
+  ): Promise<RespostaGerada> {
+    const diasPedidos = texto.match(/(\d+)\s*dias/);
+    const dias = diasPedidos ? Number(diasPedidos[1]) : /mes/.test(texto) ? 30 : 7;
+
+    const [vencidas, aVencer] = await Promise.all([
+      this.financialData.getOverdueBills(familyId),
+      this.financialData.getUpcomingBills(familyId, dias),
+    ]);
+
+    if (vencidas.length === 0 && aVencer.length === 0) {
+      return {
+        answer: `Não há contas a pagar registradas para os próximos ${dias} dias, e nenhuma está vencida. Se você espera alguma, ela ainda não foi cadastrada em Planejado.`,
+        sources: ['planned_accounts'],
+        followUpQuestions: [
+          'Quanto tenho de saldo?',
+          'Quais são meus investimentos?',
+        ],
+      };
+    }
+
+    const partes: string[] = [];
+
+    if (vencidas.length > 0) {
+      const total = vencidas.reduce((soma, c) => soma + Number(c.amount), 0);
+      const lista = vencidas
+        .slice(0, 3)
+        .map(
+          (c) =>
+            `${c.description} (${this.formatarMoeda(Number(c.amount))}, venceu em ${this.formatarData(c.dueDate)})`,
+        )
+        .join('; ');
+
+      partes.push(
+        `⚠️ ${vencidas.length} conta(s) VENCIDA(S), somando ${this.formatarMoeda(total)}: ${lista}${vencidas.length > 3 ? '…' : ''}.`,
+      );
+    }
+
+    if (aVencer.length > 0) {
+      const total = aVencer.reduce((soma, c) => soma + Number(c.amount), 0);
+      const lista = aVencer
+        .slice(0, 5)
+        .map(
+          (c) =>
+            `${c.description} — ${this.formatarMoeda(Number(c.amount))} em ${this.formatarData(c.dueDate)}`,
+        )
+        .join('; ');
+
+      partes.push(
+        `Nos próximos ${dias} dias vencem ${aVencer.length} conta(s), somando ${this.formatarMoeda(total)}: ${lista}${aVencer.length > 5 ? '…' : ''}.`,
+      );
+    }
+
+    // Confronta o compromisso com o saldo: é a informação que transforma a
+    // lista numa resposta útil.
+    const saldo = await this.financialData.getCurrentBalance(familyId);
+    const totalGeral = [...vencidas, ...aVencer].reduce(
+      (soma, c) => soma + Number(c.amount),
+      0,
+    );
+
+    partes.push(
+      totalGeral > saldo
+        ? `Seu saldo atual é ${this.formatarMoeda(saldo)} — ${this.formatarMoeda(totalGeral - saldo)} a menos do que o total dessas contas.`
+        : `Seu saldo atual é ${this.formatarMoeda(saldo)}, suficiente para essas contas.`,
+    );
+
+    return {
+      answer: partes.join(' '),
+      sources: ['planned_accounts', 'accounts'],
+      followUpQuestions: [
+        'Qual meu saldo projetado para o fim do mês?',
+        'Quanto posso gastar até o fim do mês?',
+      ],
+    };
+  }
+
+  /** Limite, fatura e ciclo de cada cartão da casa. */
+  private async responderCartoes(familyId: string): Promise<RespostaGerada> {
+    const cartoes = await this.financialData.getCreditCards(familyId);
+
+    if (cartoes.length === 0) {
+      return {
+        answer:
+          'Nenhum cartão de crédito está cadastrado. Cadastre um em Cartões para acompanhar limite, fatura e vencimento.',
+        sources: ['credit_cards'],
+        followUpQuestions: ['Quanto tenho de saldo?'],
+      };
+    }
+
+    const linhas = cartoes.map(
+      (c) =>
+        `${c.name}: ${this.formatarMoeda(c.used)} usados de ${this.formatarMoeda(c.limit)} (${this.formatarMoeda(c.available)} disponíveis), fecha dia ${c.closingDay} e vence dia ${c.dueDay}`,
+    );
+
+    const totalUsado = cartoes.reduce((soma, c) => soma + c.used, 0);
+    const totalLimite = cartoes.reduce((soma, c) => soma + c.limit, 0);
+
+    // O alerta só aparece quando há motivo: um aviso constante vira ruído.
+    const apertado = cartoes.filter(
+      (c) => c.limit > 0 && c.used / c.limit >= 0.8,
+    );
+
+    const alerta =
+      apertado.length > 0
+        ? ` ⚠️ ${apertado.map((c) => c.name).join(', ')} ${apertado.length === 1 ? 'está' : 'estão'} acima de 80% do limite.`
+        : '';
+
+    return {
+      answer: `${linhas.join('. ')}. No total, ${this.formatarMoeda(totalUsado)} de ${this.formatarMoeda(totalLimite)} em limite.${alerta}`,
+      sources: ['credit_cards', 'expenses'],
+      followUpQuestions: [
+        'Onde mais gastei este mês?',
+        'Quais contas vencem nos próximos 7 dias?',
+      ],
+    };
+  }
+
+  /** Patrimônio investido, aportado e rendimento. */
+  private async responderInvestimentos(
+    familyId: string,
+  ): Promise<RespostaGerada> {
+    const investimentos = await this.financialData.getInvestments(familyId);
+
+    if (investimentos.length === 0) {
+      return {
+        answer:
+          'Nenhum investimento está cadastrado. Cadastre suas aplicações e caixinhas em Investimentos para acompanhar rendimento e objetivos.',
+        sources: ['goals'],
+        followUpQuestions: ['Quanto tenho de saldo?'],
+      };
+    }
+
+    const atual = investimentos.reduce(
+      (soma, i) => soma + Number(i.currentAmount),
+      0,
+    );
+    const aportado = investimentos.reduce(
+      (soma, i) => soma + Number(i.investedAmount ?? 0),
+      0,
+    );
+    const rendimento = atual - aportado;
+
+    const maiores = investimentos
+      .slice(0, 3)
+      .map(
+        (i) =>
+          `${i.name} (${this.formatarMoeda(Number(i.currentAmount))}${i.institution ? `, ${i.institution}` : ''})`,
+      )
+      .join('; ');
+
+    const linhaRendimento =
+      aportado > 0
+        ? ` O rendimento acumulado é ${this.formatarMoeda(rendimento)} (${((rendimento / aportado) * 100).toFixed(2)}% sobre o aportado).`
+        : ' Ainda não há aporte registrado para calcular rendimento.';
+
+    return {
+      answer:
+        `Você tem ${this.formatarMoeda(atual)} investidos em ${investimentos.length} aplicação(ões): ${maiores}${investimentos.length > 3 ? '…' : ''}.` +
+        linhaRendimento +
+        ' Esse dinheiro está aplicado e não entra como saldo disponível nem como receita.',
+      sources: ['goals'],
+      followUpQuestions: [
+        'Quanto tenho de saldo em conta?',
+        'Quanto posso gastar até o fim do mês?',
+      ],
+    };
+  }
+
+  /**
+   * Pede a informação que falta, em vez de arriscar uma resposta.
+   *
+   * A regra 27 do projeto proíbe inventar dado. Mas dizer só "não tenho
+   * informação suficiente" deixa o usuário sem saída — a saída é dizer O QUE
+   * falta e como conseguir.
+   */
+  private pedirEsclarecimento(texto: string): RespostaGerada {
+    // Compra sem valor: sem saber quanto, não dá para dizer se cabe no caixa.
+    if (/melhor dia|posso comprar|vale a pena comprar|comprar/.test(texto)) {
+      return {
+        answer:
+          'Para recomendar o melhor dia preciso saber de quanto é a compra — o mesmo dia pode ser seguro para R$ 200 e arriscado para R$ 3.000. Qual é o valor? Se for no cartão, me diga qual cartão também, porque o ciclo da fatura muda a resposta.',
+        sources: [],
+        followUpQuestions: [
+          'Qual o melhor dia para uma compra de R$ 1.000?',
+          'Qual o limite disponível dos meus cartões?',
+        ],
+        needsClarification: true,
+      };
+    }
+
+    return {
+      answer:
+        'Não consegui identificar o que você quer saber a partir dos dados que tenho. Você quer saber sobre gastos de um período, contas a vencer, saldo, cartões ou investimentos? Se puder, diga também o período — "este mês", "últimos 30 dias".',
+      sources: [],
+      followUpQuestions: [
+        'Quanto gastei este mês?',
+        'Quais contas vencem nos próximos 7 dias?',
+        'Qual meu saldo atual?',
+      ],
+      needsClarification: true,
+    };
+  }
+
 }

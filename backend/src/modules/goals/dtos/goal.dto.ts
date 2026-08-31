@@ -28,14 +28,22 @@ export class CreateGoalDto {
   @IsNotEmpty({ message: 'Informe o tipo da meta' })
   @IsEnum(GoalType, {
     message:
-      'Tipo inválido. Use: EMERGENCY_FUND, TRAVEL, CAR, HOUSE, INVESTMENT ou OTHER.',
+      'Tipo inválido. Use um dos valores aceitos: objetivos (EMERGENCY_FUND, ' +
+      'TRAVEL, CAR, HOUSE, OTHER) ou aplicações (SAVINGS, BOX, CDB, TREASURY, ' +
+      'FUND, STOCKS, CRYPTO, PENSION, INVESTMENT).',
   })
   type: GoalType;
 
-  @IsNotEmpty({ message: 'Informe o valor objetivo da meta' })
+  /**
+   * Valor objetivo.
+   *
+   * Opcional desde que a aba virou Investimentos: um CDB não tem meta, tem
+   * valor. Quando informado, alimenta a barra de progresso.
+   */
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01, { message: 'O valor objetivo deve ser maior que zero' })
-  targetAmount: number;
+  targetAmount?: number;
 
   /** Quanto já existe guardado no momento do cadastro. */
   @IsOptional()
@@ -59,6 +67,34 @@ export class CreateGoalDto {
   @IsString()
   @MaxLength(1000)
   description?: string;
+
+  /** Onde o dinheiro está aplicado (Nubank, XP, Caixa…). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  institution?: string;
+
+  /**
+   * Quanto saiu do bolso. Quando omitido no cadastro, assume o valor atual —
+   * o rendimento começa em zero em vez de ser inventado.
+   */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0, { message: 'O valor aportado não pode ser negativo' })
+  investedAmount?: number;
+
+  /** Vencimento, para CDB, Tesouro e afins. */
+  @IsOptional()
+  @Transform(({ value }: { value: any }) => (value ? new Date(value) : value))
+  @IsDate({ message: 'Vencimento inválido. Use uma data no formato ISO.' })
+  maturityDate?: Date;
+
+  /** Em quanto tempo o dinheiro fica disponível (D+0, D+1, no vencimento…). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  liquidity?: string;
+
 }
 
 export class UpdateGoalDto {
@@ -70,7 +106,9 @@ export class UpdateGoalDto {
   @IsOptional()
   @IsEnum(GoalType, {
     message:
-      'Tipo inválido. Use: EMERGENCY_FUND, TRAVEL, CAR, HOUSE, INVESTMENT ou OTHER.',
+      'Tipo inválido. Use um dos valores aceitos: objetivos (EMERGENCY_FUND, ' +
+      'TRAVEL, CAR, HOUSE, OTHER) ou aplicações (SAVINGS, BOX, CDB, TREASURY, ' +
+      'FUND, STOCKS, CRYPTO, PENSION, INVESTMENT).',
   })
   type?: GoalType;
 
@@ -108,6 +146,34 @@ export class UpdateGoalDto {
     message: 'Status inválido. Use: ACTIVE, COMPLETED ou CANCELLED.',
   })
   status?: GoalStatus;
+
+  /** Onde o dinheiro está aplicado (Nubank, XP, Caixa…). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  institution?: string;
+
+  /**
+   * Quanto saiu do bolso. Quando omitido no cadastro, assume o valor atual —
+   * o rendimento começa em zero em vez de ser inventado.
+   */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0, { message: 'O valor aportado não pode ser negativo' })
+  investedAmount?: number;
+
+  /** Vencimento, para CDB, Tesouro e afins. */
+  @IsOptional()
+  @Transform(({ value }: { value: any }) => (value ? new Date(value) : value))
+  @IsDate({ message: 'Vencimento inválido. Use uma data no formato ISO.' })
+  maturityDate?: Date;
+
+  /** Em quanto tempo o dinheiro fica disponível (D+0, D+1, no vencimento…). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  liquidity?: string;
+
 }
 
 /** Aporte feito na meta: valor e, opcionalmente, a data em que ocorreu. */

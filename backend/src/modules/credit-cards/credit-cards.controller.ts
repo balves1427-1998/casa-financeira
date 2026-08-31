@@ -16,11 +16,62 @@ import { GetCurrentUser } from '../../common/decorators/get-current-user.decorat
 import { User } from '../users/entities/user.entity';
 import { CreditCardsService } from './credit-cards.service';
 import { CreateCreditCardDto, UpdateCreditCardDto } from './dtos/create-credit-card.dto';
+import { CardStatementService } from './services/card-statement.service';
+import { DefaultValuePipe, ParseIntPipe, Query, NotFoundException } from '@nestjs/common';
 
 @Controller('credit-cards')
 @UseGuards(JwtAuthGuard)
 export class CreditCardsController {
-  constructor(private creditCardsService: CreditCardsService) {}
+  constructor(
+    private creditCardsService: CreditCardsService,
+    private cardStatementService: CardStatementService,
+  ) {}
+
+  /**
+   * Fatura aberta, próxima, limite e categorias — tudo derivado dos
+   * lançamentos do cartão.
+   *
+   * Rota declarada ANTES de `@Get(':id')` não é necessária aqui porque o
+   * caminho tem um segmento a mais, mas a ordem é mantida por clareza.
+   */
+  @Get(':id/statement')
+  async getStatement(
+    @Param('id') id: string,
+    @GetCurrentUser() user: User,
+  ) {
+    const statement = await this.cardStatementService.getStatement(id, user);
+
+    if (!statement) {
+      throw new NotFoundException('Cartão não encontrado');
+    }
+
+    return statement;
+  }
+
+  /** Evolução do gasto mês a mês. */
+  @Get(':id/history')
+  async getHistory(
+    @Param('id') id: string,
+    @GetCurrentUser() user: User,
+    @Query('months', new DefaultValuePipe(12), ParseIntPipe) months: number,
+  ) {
+    return this.cardStatementService.getHistory(id, user, months);
+  }
+
+  /** Melhor dia para comprar, pelo ciclo da fatura. */
+  @Get(':id/best-day')
+  async getBestDay(@Param('id') id: string, @GetCurrentUser() user: User) {
+    const recomendacao = await this.cardStatementService.getBestDayToBuy(
+      id,
+      user,
+    );
+
+    if (!recomendacao) {
+      throw new NotFoundException('Cartão não encontrado');
+    }
+
+    return recomendacao;
+  }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)

@@ -55,6 +55,15 @@ export class SendChatMessageDto {
 }
 
 export class ChatMessageResponseDto {
+  /**
+   * `true` quando a "resposta" é, na verdade, uma PERGUNTA de volta.
+   *
+   * Acontece quando os dados não bastam para concluir nada — pedir o melhor dia
+   * para uma compra sem dizer o valor, por exemplo. A tela usa isto para
+   * destacar que ainda falta informação, em vez de apresentar o texto como
+   * conclusão.
+   */
+  needsClarification?: boolean;
   @IsString()
   answer: string;
 

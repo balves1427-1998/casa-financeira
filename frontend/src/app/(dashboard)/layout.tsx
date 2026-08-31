@@ -37,7 +37,7 @@ export default function DashboardLayout({ children }: LayoutProps) {
     { label: 'Categorias', href: '/categories', icon: '📂' },
     { label: 'Cartões', href: '/cards', icon: '💳' },
     { label: 'Planejado', href: '/planned', icon: '📋' },
-    { label: 'Metas', href: '/metas', icon: '🎯' },
+    { label: 'Investimentos', href: '/investimentos', icon: '📈' },
     { label: 'Divisão', href: '/divisao', icon: '⚖️' },
     { label: 'Fluxo de Caixa', href: '/cash-flow', icon: '📈' },
     { label: 'Relatórios', href: '/relatorios', icon: '📄' },

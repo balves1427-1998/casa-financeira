@@ -1,5 +1,11 @@
 /**
- * Tipos do módulo de Metas Financeiras (`goals`).
+ * Tipos do módulo de INVESTIMENTOS (tabela `goals`).
+ *
+ * A aba Metas foi absorvida por Investimentos: objetivos ("caixinha da viagem")
+ * e aplicações (CDB, Tesouro, poupança) são a mesma coisa vista de dois
+ * ângulos, e mantê-las separadas obrigava a cadastrar a mesma poupança duas
+ * vezes. A tabela do backend continua se chamando `goals` — renomeá-la custaria
+ * uma migração de dados sem ganho nenhum para quem usa.
  *
  * Espelham o backend em:
  * backend/src/modules/goals/goals.types.ts
@@ -18,7 +24,28 @@ export enum GoalType {
   HOUSE = 'HOUSE',
   INVESTMENT = 'INVESTMENT',
   OTHER = 'OTHER',
+  SAVINGS = 'SAVINGS',
+  BOX = 'BOX',
+  CDB = 'CDB',
+  TREASURY = 'TREASURY',
+  FUND = 'FUND',
+  STOCKS = 'STOCKS',
+  CRYPTO = 'CRYPTO',
+  PENSION = 'PENSION',
 }
+
+/**
+ * Separação usada só na tela: objetivos têm valor-alvo e prazo; aplicações
+ * têm instituição e rendimento. O backend trata os dois igual.
+ */
+export const GOAL_TYPES_OBJETIVO: GoalType[] = [
+  GoalType.EMERGENCY_FUND,
+  GoalType.TRAVEL,
+  GoalType.CAR,
+  GoalType.HOUSE,
+  GoalType.BOX,
+  GoalType.OTHER,
+];
 
 export enum GoalStatus {
   ACTIVE = 'ACTIVE',
@@ -31,8 +58,16 @@ export const GOAL_TYPE_LABELS: Record<string, string> = {
   [GoalType.TRAVEL]: 'Viagem',
   [GoalType.CAR]: 'Carro',
   [GoalType.HOUSE]: 'Casa',
-  [GoalType.INVESTMENT]: 'Investimentos',
+  [GoalType.INVESTMENT]: 'Investimento',
   [GoalType.OTHER]: 'Outros',
+  [GoalType.SAVINGS]: 'Poupança',
+  [GoalType.BOX]: 'Caixinha',
+  [GoalType.CDB]: 'CDB',
+  [GoalType.TREASURY]: 'Tesouro Direto',
+  [GoalType.FUND]: 'Fundo',
+  [GoalType.STOCKS]: 'Ações',
+  [GoalType.CRYPTO]: 'Cripto',
+  [GoalType.PENSION]: 'Previdência',
 };
 
 export const GOAL_TYPE_ICONS: Record<string, string> = {
@@ -42,6 +77,14 @@ export const GOAL_TYPE_ICONS: Record<string, string> = {
   [GoalType.HOUSE]: '🏠',
   [GoalType.INVESTMENT]: '📈',
   [GoalType.OTHER]: '🎯',
+  [GoalType.SAVINGS]: '🐷',
+  [GoalType.BOX]: '📦',
+  [GoalType.CDB]: '🏦',
+  [GoalType.TREASURY]: '🏛️',
+  [GoalType.FUND]: '📊',
+  [GoalType.STOCKS]: '📉',
+  [GoalType.CRYPTO]: '🪙',
+  [GoalType.PENSION]: '👴',
 };
 
 export const GOAL_TYPE_OPTIONS: Array<{ value: GoalType; label: string }> =
@@ -62,6 +105,12 @@ export interface GoalProgressDto {
   progressPercentage: number | null;
   targetAmount: number;
   currentAmount: number;
+  /** Quanto saiu do bolso. */
+  investedAmount: number;
+  /** Ganho (ou perda): valor atual menos aportado. Pode ser negativo. */
+  profit: number;
+  /** Rentabilidade em % sobre o aportado. `null` quando nada foi aportado. */
+  profitPercentage: number | null;
   /** Quanto ainda falta guardar. Nunca negativo. */
   remainingAmount: number;
   isCompleted: boolean;
@@ -96,8 +145,12 @@ export interface GoalDto {
   userId: string;
   name: string;
   type: GoalType | string;
-  targetAmount: number | string;
+  targetAmount: number | string | null;
   currentAmount: number | string;
+  investedAmount?: number | string;
+  institution?: string | null;
+  maturityDate?: string | null;
+  liquidity?: string | null;
   deadline?: Date | string | null;
   monthlyContribution?: number | string | null;
   description?: string | null;
@@ -126,6 +179,9 @@ export interface GoalsSummaryDto {
   /** Totais consideram metas ativas e concluídas — canceladas ficam de fora. */
   totalTargetAmount: number;
   totalCurrentAmount: number;
+  totalInvestedAmount: number;
+  totalProfit: number;
+  totalProfitPercentage: number | null;
   totalRemainingAmount: number;
   /** Progresso agregado. `null` se não houver objetivo. */
   overallProgressPercentage: number | null;
@@ -145,8 +201,16 @@ export interface CreateGoalDto {
   name: string;
   type: GoalType;
   /** Precisa ser maior que zero. */
-  targetAmount: number;
+  targetAmount?: number;
   currentAmount?: number;
+  /** Quanto saiu do bolso. Omitido, assume o valor atual. */
+  investedAmount?: number;
+  /** Onde o dinheiro está aplicado. */
+  institution?: string;
+  /** Vencimento, para CDB, Tesouro e afins. ISO. */
+  maturityDate?: string;
+  /** Em quanto tempo o dinheiro fica disponível. */
+  liquidity?: string;
   /** ISO — o backend converte com `new Date(value)`. */
   deadline?: string;
   /** Aporte mensal PLANEJADO (o necessário é calculado pelo backend). */

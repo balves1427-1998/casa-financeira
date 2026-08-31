@@ -73,6 +73,20 @@ export class PlannedAccount {
   @Column({ nullable: true })
   recurringExpenseId?: string;
 
+  /**
+   * Se esta linha é dinheiro que SAI ou que ENTRA.
+   *
+   * Default `'expense'` porque a tabela nasceu só com contas a pagar, e todo
+   * consumidor subtrai `amount` do saldo. Uma entrada sem esta marca seria
+   * debitada em vez de creditada.
+   */
+  @Column({ default: 'expense' })
+  type: 'expense' | 'income';
+
+  /** Receita recorrente que projetou esta entrada. */
+  @Column({ nullable: true })
+  recurringIncomeId?: string;
+
   @Column({ nullable: true })
   paymentDate?: Date;
 

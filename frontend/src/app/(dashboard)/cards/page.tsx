@@ -4,6 +4,7 @@ import { FormEvent, useMemo, useState } from 'react';
 import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { useCreditCards, type CreditCard } from '@/hooks/useCreditCards';
+import { CardStatementPanel } from '@/components/CardStatementPanel';
 import { useAccounts } from '@/hooks/useAccounts';
 import {
   CARD_NUMBER_PATTERN,
@@ -83,6 +84,15 @@ export default function CreditCardsPage() {
   const [validationError, setValidationError] = useState<string | null>(null);
 
   // Confirmação inline de exclusão — sem `window.confirm`
+  /**
+   * Cartão com o painel de fatura aberto.
+   *
+   * Um de cada vez: os três endpoints do painel (fatura, histórico e melhor
+   * dia) são carregados na abertura, e abrir todos de uma vez faria a tela
+   * disparar uma dúzia de requisições sem que ninguém tivesse pedido.
+   */
+  const [cartaoDetalhado, setCartaoDetalhado] = useState<string | null>(null);
+
   const [confirmingDeletionId, setConfirmingDeletionId] = useState<string | null>(
     null,
   );
@@ -296,7 +306,8 @@ export default function CreditCardsPage() {
             💳 Cartões de Crédito
           </h1>
           <p className="text-gray-600 dark:text-gray-400">
-            Gerencie seus cartões de crédito e o limite disponível
+            Fatura, limite disponível, onde você mais gasta e o melhor dia
+            para comprar — com importação da fatura em PDF
           </p>
         </div>
         <Button variant="primary" onClick={handleOpenCreate}>
@@ -822,10 +833,22 @@ export default function CreditCardsPage() {
                   {/* Actions */}
                   <div className="flex gap-2">
                     <button
+                      onClick={() =>
+                        setCartaoDetalhado(
+                          cartaoDetalhado === card.id ? null : card.id,
+                        )
+                      }
+                      className="flex-1 px-3 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded transition-colors"
+                    >
+                      {cartaoDetalhado === card.id
+                        ? '▲ Fechar fatura'
+                        : '📄 Ver fatura'}
+                    </button>
+                    <button
                       onClick={() => handleEdit(card)}
                       className="flex-1 px-3 py-2 text-sm font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
                     >
-                      ✏️ Editar
+                      ✏️
                     </button>
                     {confirmingDeletionId !== card.id && (
                       <button
@@ -838,6 +861,11 @@ export default function CreditCardsPage() {
                       </button>
                     )}
                   </div>
+
+                  {/* Fatura, categorias, histórico e importação de PDF */}
+                  {cartaoDetalhado === card.id && (
+                    <CardStatementPanel cardId={card.id} />
+                  )}
 
                   {/* Confirmação inline — sem diálogo nativo */}
                   {confirmingDeletionId === card.id && (

@@ -598,6 +598,19 @@ class ApiClient {
   }
 
   /**
+   * Encerra ou retoma a recorrência de uma receita.
+   *
+   * Cancelar não apaga a receita — ela é dinheiro que entrou. O que termina é
+   * a projeção dos meses seguintes no Planejado.
+   */
+  async setIncomeRecurrence(id: string, active: boolean) {
+    const response = await this.client.patch(`/incomes/${id}/recurrence`, {
+      active,
+    });
+    return response.data;
+  }
+
+  /**
    * Encerra ou retoma a recorrência de uma despesa.
    *
    * Cancelar não apaga a despesa — ela continua sendo um gasto realizado. O que
@@ -623,6 +636,61 @@ class ApiClient {
   ): Promise<{ count: number; total: number }> {
     const response = await this.client.get('/expenses/paid-summary', {
       params: { month, year },
+    });
+    return response.data;
+  }
+
+  // ==================== Cartões: fatura, histórico e ciclo ====================
+  //
+  // Estes três derivam tudo dos LANÇAMENTOS do cartão. O `currentBalance` que
+  // existia na entidade só mudava se alguém o editasse à mão, então o limite
+  // utilizado nunca refletia as compras — nem as importadas de fatura.
+
+  /** Fatura aberta, próxima, limite utilizado e categorias do cartão. */
+  async getCardStatement(cardId: string) {
+    const response = await this.client.get(`/credit-cards/${cardId}/statement`);
+    return response.data;
+  }
+
+  /** Evolução do gasto mês a mês no cartão. */
+  async getCardHistory(cardId: string, months = 12) {
+    const response = await this.client.get(`/credit-cards/${cardId}/history`, {
+      params: { months },
+    });
+    return response.data;
+  }
+
+  /** Melhor dia para comprar, pelo ciclo de fechamento da fatura. */
+  async getCardBestDay(cardId: string) {
+    const response = await this.client.get(`/credit-cards/${cardId}/best-day`);
+    return response.data;
+  }
+
+  /**
+   * Envia a fatura em PDF para leitura.
+   *
+   * `creditCardId` é o que faz as compras lidas contarem no limite do cartão
+   * certo — sem ele a fatura entra "solta" e o cartão continua parecendo vazio.
+   */
+  async uploadCardInvoice(fileName: string, base64: string, creditCardId: string) {
+    const response = await this.client.post('/pdf-import/upload', {
+      fileName,
+      fileContent: base64,
+      creditCardId,
+    });
+    return response.data;
+  }
+
+  /** Lançamentos lidos de um PDF, para conferência antes de gravar. */
+  async getPdfImport(id: string) {
+    const response = await this.client.get(`/pdf-import/${id}`);
+    return response.data;
+  }
+
+  /** Confirma a importação, gravando os lançamentos escolhidos. */
+  async confirmPdfImport(id: string, selectedTransactionIds?: string[]) {
+    const response = await this.client.put(`/pdf-import/${id}/confirm`, {
+      selectedTransactionIds,
     });
     return response.data;
   }

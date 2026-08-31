@@ -8,9 +8,13 @@ import { Income } from '../income/entities/income.entity';
 import { PlannedAccount } from '../planned-accounts/entities/planned-account.entity';
 import { CreditCard } from '../credit-cards/entities/credit-card.entity';
 import { Account } from '../accounts/entities/account.entity';
+import { FamiliesModule } from '../families/families.module';
 
 @Module({
   imports: [
+    // O fluxo de caixa é da CASA: precisa dos membros da família para somar
+    // os lançamentos de todos.
+    FamiliesModule,
     TypeOrmModule.forFeature([
       CashFlowSnapshot,
       Expense,

@@ -42,6 +42,16 @@ export class PdfImport {
   @Column({ nullable: true })
   cardName?: string; // Card name if detected
 
+  /**
+   * Cartão ao qual esta fatura pertence.
+   *
+   * Informado pelo usuário no upload. Sem ele, as despesas da fatura entravam
+   * sem cartão nenhum — e o limite utilizado, que é derivado das compras com
+   * `creditCardId`, nunca refletia a fatura importada.
+   */
+  @Column({ nullable: true })
+  creditCardId?: string;
+
   @Column({ type: 'json' })
   extractedData: any; // Raw extracted data from PDF
 

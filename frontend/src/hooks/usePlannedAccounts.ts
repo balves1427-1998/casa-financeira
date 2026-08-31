@@ -28,6 +28,10 @@ export interface PlannedAccount {
    * Nulo nas contas cadastradas à mão.
    */
   recurringExpenseId?: string | null;
+  /** Receita recorrente que projetou esta entrada. */
+  recurringIncomeId?: string | null;
+  /** Se esta linha é dinheiro que sai ('expense') ou que entra ('income'). */
+  type: 'expense' | 'income';
   paymentDate?: string;
   createdAt: string;
   updatedAt: string;
@@ -45,6 +49,9 @@ function normalizePlanned(raw: any): PlannedAccount {
     ...raw,
     amount: toPlannedAmount(raw?.amount),
     priority: Number(raw?.priority ?? 0),
+    // Registros anteriores à coluna vêm sem o campo: tratar como saída mantém
+    // o comportamento antigo, que era o único que existia.
+    type: raw?.type === 'income' ? 'income' : 'expense',
     isRecurring: Boolean(raw?.isRecurring),
   } as PlannedAccount;
 }

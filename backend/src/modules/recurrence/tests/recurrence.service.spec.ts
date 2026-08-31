@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { RecurrenceService } from '../recurrence.service';
 import { Expense } from '../../expenses/entities/expense.entity';
+import { Income } from '../../income/entities/income.entity';
 import { PlannedAccount } from '../../planned-accounts/entities/planned-account.entity';
 
 /**
@@ -70,6 +71,18 @@ describe('RecurrenceService', () => {
 
   const mockExpensesRepository = {
     find: jest.fn(),
+    findOne: jest.fn(),
+    update: jest.fn(),
+  };
+
+  /**
+   * A série passou a atender receitas também (salário recorrente projeta
+   * ENTRADAS no Planejado). Estes testes cobrem o lado das despesas; o
+   * repositório de receitas responde vazio.
+   */
+  const mockIncomesRepository = {
+    find: jest.fn(async () => []),
+    findOne: jest.fn(),
     update: jest.fn(),
   };
 
@@ -90,6 +103,10 @@ describe('RecurrenceService', () => {
         {
           provide: getRepositoryToken(Expense),
           useValue: mockExpensesRepository,
+        },
+        {
+          provide: getRepositoryToken(Income),
+          useValue: mockIncomesRepository,
         },
         {
           provide: getRepositoryToken(PlannedAccount),
@@ -229,6 +246,7 @@ describe('RecurrenceService', () => {
   describe('sincronizarTodas', () => {
     it('ignora séries cuja janela ainda está longe do fim', async () => {
       mockExpensesRepository.find.mockResolvedValue([despesaRecorrente()]);
+      mockIncomesRepository.find.mockResolvedValue([]);
 
       const bemAFrente = new Date();
       bemAFrente.setMonth(bemAFrente.getMonth() + 11);
@@ -244,6 +262,7 @@ describe('RecurrenceService', () => {
 
     it('reabastece a série cuja janela encurtou', async () => {
       mockExpensesRepository.find.mockResolvedValue([despesaRecorrente()]);
+      mockIncomesRepository.find.mockResolvedValue([]);
 
       const quaseAcabando = new Date();
       quaseAcabando.setMonth(quaseAcabando.getMonth() + 1);
@@ -259,6 +278,7 @@ describe('RecurrenceService', () => {
 
     it('não faz nada quando a casa não tem série ativa', async () => {
       mockExpensesRepository.find.mockResolvedValue([]);
+      mockIncomesRepository.find.mockResolvedValue([]);
 
       await expect(service.sincronizarTodas(USER_IDS)).resolves.toBe(0);
     });

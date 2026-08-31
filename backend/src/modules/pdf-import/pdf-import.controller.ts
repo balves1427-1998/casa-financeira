@@ -30,7 +30,12 @@ export class PdfImportController {
   async uploadPdf(@Req() req: any, @Body() dto: UploadPdfDto) {
     // Convert base64 to buffer
     const fileBuffer = Buffer.from(dto.fileContent, 'base64');
-    return this.pdfImportService.uploadPdf(req.user, dto.fileName, fileBuffer);
+    return this.pdfImportService.uploadPdf(
+      req.user,
+      dto.fileName,
+      fileBuffer,
+      dto.creditCardId,
+    );
   }
 
   /**

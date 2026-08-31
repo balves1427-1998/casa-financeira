@@ -1432,9 +1432,9 @@ export default function RelatoriosPage() {
           >
             {preview.goals.totalGoals === 0 ? (
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Nenhuma meta cadastrada. Crie objetivos em{' '}
-                <Link href="/metas" className="underline font-medium">
-                  Metas
+                Nenhum objetivo cadastrado. Crie um em{' '}
+                <Link href="/investimentos" className="underline font-medium">
+                  Investimentos
                 </Link>
                 .
               </p>

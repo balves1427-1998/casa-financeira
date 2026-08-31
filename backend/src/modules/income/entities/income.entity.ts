@@ -51,6 +51,23 @@ export class Income {
   @Column({ nullable: true })
   observation?: string;
 
+  /**
+   * Quando a série recorrente foi encerrada.
+   *
+   * Nulo enquanto a recorrência está ativa. A receita original permanece: ela é
+   * dinheiro que entrou de fato. O que acaba é a projeção dos meses seguintes.
+   */
+  @Column({ nullable: true })
+  recurrenceCancelledAt?: Date;
+
+  /**
+   * Conta do Planejado que originou esta receita, quando ela veio da
+   * confirmação de uma entrada prevista. O vínculo impede que a mesma
+   * confirmação gere duas receitas.
+   */
+  @Column({ nullable: true })
+  plannedAccountId?: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

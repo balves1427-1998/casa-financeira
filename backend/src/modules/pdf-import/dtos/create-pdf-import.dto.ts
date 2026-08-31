@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsArray, IsUUID } from 'class-validator';
 
 export class UploadPdfDto {
   @IsString()
@@ -6,6 +6,14 @@ export class UploadPdfDto {
 
   @IsString()
   fileContent: string; // Base64 encoded content
+
+  /**
+   * Cartão da fatura. Obrigatório na prática para faturas de cartão: é o que
+   * faz as compras importadas contarem no limite utilizado.
+   */
+  @IsOptional()
+  @IsUUID()
+  creditCardId?: string;
 }
 
 export class ReviewPdfImportDto {

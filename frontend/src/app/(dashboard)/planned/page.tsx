@@ -133,16 +133,38 @@ export default function PlannedPage() {
   );
 
   /**
+   * Totais em aberto, separados por lado.
+   *
    * `amount` é `decimal` no Postgres e chega como string; o hook já converte
    * com `Number()`, então aqui a soma é aritmética de verdade.
+   *
+   * Entrada e saída são somadas em separado de propósito: um total único
+   * misturaria R$ 8.500 de salário com R$ 1.800 de aluguel e não responderia
+   * nem "quanto tenho a pagar" nem "quanto vou receber".
    */
-  const totalPending = useMemo(
-    () =>
-      planned
-        .filter(p => p.status === 'pending' || p.status === 'confirmed')
-        .reduce((sum, p) => sum + p.amount, 0),
+  const emAberto = useMemo(
+    () => planned.filter(p => p.status === 'pending' || p.status === 'confirmed'),
     [planned],
   );
+
+  const totalPending = useMemo(
+    () =>
+      emAberto
+        .filter(p => p.type !== 'income')
+        .reduce((sum, p) => sum + p.amount, 0),
+    [emAberto],
+  );
+
+  const totalAReceber = useMemo(
+    () =>
+      emAberto
+        .filter(p => p.type === 'income')
+        .reduce((sum, p) => sum + p.amount, 0),
+    [emAberto],
+  );
+
+  /** O que sobra depois de pagar tudo o que está previsto. */
+  const saldoPlanejado = totalAReceber - totalPending;
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -394,20 +416,56 @@ export default function PlannedPage() {
         </Card>
       </div>
 
-      {/* Total Pending */}
-      <Card className="border-2 border-indigo-200 dark:border-indigo-800">
-        <div>
+      {/* Visão consolidada: o que entra, o que sai e o que sobra */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="border-2 border-green-200 dark:border-green-800">
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
-            Total a Pagar
+            A Receber
           </p>
-          <p className="text-3xl font-bold text-indigo-600">
+          <p className="text-3xl font-bold text-green-600">
+            {formatBRL(totalAReceber)}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Salários e outras receitas recorrentes previstas
+          </p>
+        </Card>
+
+        <Card className="border-2 border-red-200 dark:border-red-800">
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
+            A Pagar
+          </p>
+          <p className="text-3xl font-bold text-red-600">
             {formatBRL(totalPending)}
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Soma das contas previstas e confirmadas
+            Contas previstas e confirmadas
           </p>
-        </div>
-      </Card>
+        </Card>
+
+        <Card
+          className={`border-2 ${
+            saldoPlanejado >= 0
+              ? 'border-indigo-200 dark:border-indigo-800'
+              : 'border-amber-300 dark:border-amber-800'
+          }`}
+        >
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
+            Saldo Planejado
+          </p>
+          <p
+            className={`text-3xl font-bold ${
+              saldoPlanejado >= 0 ? 'text-indigo-600' : 'text-amber-600'
+            }`}
+          >
+            {formatBRL(saldoPlanejado)}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {saldoPlanejado >= 0
+              ? 'O que sobra depois de pagar tudo o que está previsto'
+              : 'O previsto a pagar supera o previsto a receber'}
+          </p>
+        </Card>
+      </div>
 
       {/* Filter */}
       <Card>
@@ -766,6 +824,21 @@ export default function PlannedPage() {
                     </div>
 
                     <div className="flex flex-wrap gap-2 items-center mt-2">
+                      {/*
+                        Entrada e saída na mesma lista precisam ser distinguíveis
+                        de relance: sem esta marca, R$ 8.500 de salário e
+                        R$ 8.500 de conta a pagar ficam idênticos na tela.
+                      */}
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-medium ${
+                          account.type === 'income'
+                            ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                            : 'bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300'
+                        }`}
+                      >
+                        {account.type === 'income' ? '↓ A receber' : '↑ A pagar'}
+                      </span>
+
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(
                           account.status,
@@ -806,12 +879,20 @@ export default function PlannedPage() {
                   </div>
 
                   <div className="text-right">
-                    <p className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+                    <p
+                      className={`text-2xl font-bold mb-2 ${
+                        account.type === 'income'
+                          ? 'text-green-600 dark:text-green-400'
+                          : 'text-gray-900 dark:text-white'
+                      }`}
+                    >
+                      {account.type === 'income' ? '+ ' : ''}
                       {formatBRL(account.amount)}
                     </p>
 
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                      Vence: {formatDateBR(account.dueDate)}
+                      {account.type === 'income' ? 'Entra' : 'Vence'}:{' '}
+                      {formatDateBR(account.dueDate)}
                     </p>
 
                     <div className="flex flex-wrap gap-2 justify-end">

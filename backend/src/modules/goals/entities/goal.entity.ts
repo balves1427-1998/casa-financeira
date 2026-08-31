@@ -13,6 +13,13 @@ import { User } from '../../users/entities/user.entity';
 import { Family } from '../../families/entities/family.entity';
 
 /** Tipos de meta previstos no item 19 do escopo do projeto. */
+/**
+ * Classificação do investimento.
+ *
+ * Os seis primeiros valores são os objetivos que a antiga aba Metas conhecia e
+ * continuam valendo — a "caixinha da viagem" é TRAVEL. Os demais descrevem onde
+ * o dinheiro está aplicado, que é o que faltava para acompanhar rendimento.
+ */
 export enum GoalType {
   EMERGENCY_FUND = 'EMERGENCY_FUND',
   TRAVEL = 'TRAVEL',
@@ -20,6 +27,14 @@ export enum GoalType {
   HOUSE = 'HOUSE',
   INVESTMENT = 'INVESTMENT',
   OTHER = 'OTHER',
+  SAVINGS = 'SAVINGS',
+  BOX = 'BOX',
+  CDB = 'CDB',
+  TREASURY = 'TREASURY',
+  FUND = 'FUND',
+  STOCKS = 'STOCKS',
+  CRYPTO = 'CRYPTO',
+  PENSION = 'PENSION',
 }
 
 export enum GoalStatus {
@@ -63,11 +78,55 @@ export class Goal {
   @Column({ name: 'type', type: 'varchar', length: 30, default: GoalType.OTHER })
   type: GoalType;
 
-  /** Valor objetivo da meta. */
-  @Column({ name: 'target_amount', type: 'decimal', precision: 15, scale: 2 })
-  targetAmount: number;
+  /**
+   * Valor objetivo.
+   *
+   * Opcional: um CDB não tem objetivo, tem valor. Fica nulo nos investimentos
+   * que existem só para acompanhar rendimento.
+   */
+  @Column({
+    name: 'target_amount',
+    type: 'decimal',
+    precision: 15,
+    scale: 2,
+    nullable: true,
+  })
+  targetAmount?: number;
 
-  /** Quanto já foi acumulado. Cresce com os aportes. */
+  /** Onde o dinheiro está aplicado (Nubank, XP, Caixa…). */
+  @Column({ name: 'institution', type: 'varchar', length: 255, nullable: true })
+  institution?: string;
+
+  /**
+   * Quanto foi APORTADO, do próprio bolso.
+   *
+   * Separado de `currentAmount` de propósito: sem os dois números não há como
+   * calcular rendimento — "tenho R$ 10.000" não distingue o que foi guardado do
+   * que a aplicação rendeu.
+   */
+  @Column({
+    name: 'invested_amount',
+    type: 'decimal',
+    precision: 15,
+    scale: 2,
+    default: 0,
+  })
+  investedAmount: number;
+
+  /** Vencimento, para CDB, Tesouro e afins. */
+  @Column({ name: 'maturity_date', type: 'timestamp', nullable: true })
+  maturityDate?: Date;
+
+  /** Em quanto tempo o dinheiro fica disponível (D+0, D+1, no vencimento…). */
+  @Column({ name: 'liquidity', type: 'varchar', length: 30, nullable: true })
+  liquidity?: string;
+
+  /**
+   * Valor ATUAL da aplicação.
+   *
+   * Cresce com os aportes e pode ser corrigido pelo usuário para refletir o
+   * rendimento. A diferença para `investedAmount` é o ganho (ou a perda).
+   */
   @Column({
     name: 'current_amount',
     type: 'decimal',

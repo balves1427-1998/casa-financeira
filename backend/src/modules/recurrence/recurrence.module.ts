@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Expense } from '../expenses/entities/expense.entity';
+import { Income } from '../income/entities/income.entity';
 import { PlannedAccount } from '../planned-accounts/entities/planned-account.entity';
 import { RecurrenceService } from './recurrence.service';
 
@@ -15,7 +16,7 @@ import { RecurrenceService } from './recurrence.service';
  * razão.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([Expense, PlannedAccount])],
+  imports: [TypeOrmModule.forFeature([Expense, Income, PlannedAccount])],
   providers: [RecurrenceService],
   exports: [RecurrenceService],
 })

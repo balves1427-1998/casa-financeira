@@ -78,6 +78,12 @@ export interface IncomeAccountDto {
 
 /** Receita retornada pela API. */
 export interface IncomeDto {
+  /**
+   * Preenchido quando a série recorrente foi encerrada.
+   * A receita continua valendo como dinheiro que entrou; o que para é a
+   * projeção dos meses seguintes no Planejado.
+   */
+  recurrenceCancelledAt?: string | null;
   id: string;
   userId: string;
   accountId: string;

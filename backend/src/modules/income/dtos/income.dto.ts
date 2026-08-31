@@ -132,3 +132,16 @@ export class UpdateIncomeDto {
   @MaxLength(500)
   observation?: string;
 }
+
+/**
+ * Encerra ou retoma a recorrência de uma receita.
+ *
+ * `active: false` para de projetar os meses seguintes e limpa as entradas
+ * futuras ainda não recebidas. A receita em si permanece — ela é dinheiro que
+ * entrou de fato.
+ */
+export class SetIncomeRecurrenceDto {
+  @IsNotEmpty()
+  @IsBoolean()
+  active: boolean;
+}

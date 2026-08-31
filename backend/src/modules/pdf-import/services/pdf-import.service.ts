@@ -27,6 +27,7 @@ export class PdfImportService {
     user: User,
     fileName: string,
     fileContent: Buffer,
+    creditCardId?: string,
   ): Promise<PdfImport> {
     try {
       // Parse PDF to extract transactions
@@ -53,6 +54,9 @@ export class PdfImportService {
 
       // Create PDF import record
       const pdfImport = this.pdfImportRepository.create({
+      // Cartão da fatura: é o vínculo que faz as compras importadas contarem
+      // no limite utilizado do cartão certo.
+      creditCardId,
         userId: user.id,
         fileName,
         importType: parseResult.type,
@@ -223,6 +227,9 @@ export class PdfImportService {
           subcategory: tx.suggestedSubcategory,
           responsible: 'bruno', // Default, should be user-selectable
           paymentMethod: 'credit',
+          // Sem o cartão, a compra importada não conta no limite utilizado —
+          // a fatura entrava e o cartão continuava "zerado".
+          creditCardId: pdfImport.creditCardId,
           origin: 'import',
           observation: pdfImport.fileName,
         });

@@ -5,6 +5,9 @@ import { Expense } from '../expenses/entities/expense.entity';
 import { Income } from '../income/entities/income.entity';
 import { Account } from '../accounts/entities/account.entity';
 import { User } from '../users/entities/user.entity';
+import { PlannedAccount } from '../planned-accounts/entities/planned-account.entity';
+import { CreditCard } from '../credit-cards/entities/credit-card.entity';
+import { Goal } from '../goals/entities/goal.entity';
 import {
   MonthlyPoint,
   DailyPoint,
@@ -53,6 +56,12 @@ export class FinancialDataService {
     private accountRepository: Repository<Account>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(PlannedAccount)
+    private readonly plannedRepository: Repository<PlannedAccount>,
+    @InjectRepository(CreditCard)
+    private readonly cardRepository: Repository<CreditCard>,
+    @InjectRepository(Goal)
+    private readonly goalRepository: Repository<Goal>,
   ) {}
 
   // ==================== escopo da família ====================
@@ -558,4 +567,158 @@ export class FinancialDataService {
     const series = await this.getMonthlyExpenseSeries(familyId, 12);
     return series.length >= minMonths;
   }
+
+  // ==================== Planejado, cartões e investimentos ====================
+  //
+  // Estes três blocos existem porque o assistente respondia "não sei" para
+  // perguntas cujos dados o sistema TINHA — vencimentos, limite de cartão,
+  // quanto está investido. A camada de leitura só conhecia despesas, receitas e
+  // contas, então o roteador da IA classificava tudo isso como fora de escopo.
+
+  /**
+   * Contas a pagar em aberto, da mais próxima para a mais distante.
+   *
+   * Só `type = 'expense'`: entradas previstas (salário projetado) não são
+   * compromisso a pagar. E só o que ainda está pendente — o que já foi pago
+   * virou lançamento real e é contado como despesa.
+   */
+  async getUpcomingBills(
+    familyId: string,
+    dias = 30,
+  ): Promise<PlannedAccount[]> {
+    const userIds = await this.getFamilyUserIds(familyId);
+    if (userIds.length === 0) return [];
+
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const limite = new Date(hoje);
+    limite.setDate(limite.getDate() + dias);
+
+    return this.plannedRepository
+      .createQueryBuilder('planned')
+      .where('planned.userId IN (:...userIds)', { userIds })
+      .andWhere("planned.type = 'expense'")
+      .andWhere("planned.status IN ('pending', 'confirmed', 'overdue')")
+      .andWhere('planned.dueDate BETWEEN :hoje AND :limite', { hoje, limite })
+      .orderBy('planned.dueDate', 'ASC')
+      .getMany();
+  }
+
+  /** Contas cujo vencimento já passou e continuam em aberto. */
+  async getOverdueBills(familyId: string): Promise<PlannedAccount[]> {
+    const userIds = await this.getFamilyUserIds(familyId);
+    if (userIds.length === 0) return [];
+
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+
+    return this.plannedRepository
+      .createQueryBuilder('planned')
+      .where('planned.userId IN (:...userIds)', { userIds })
+      .andWhere("planned.type = 'expense'")
+      .andWhere("planned.status IN ('pending', 'confirmed', 'overdue')")
+      .andWhere('planned.dueDate < :hoje', { hoje })
+      .orderBy('planned.dueDate', 'ASC')
+      .getMany();
+  }
+
+  /** Entradas previstas — salário e demais receitas recorrentes projetadas. */
+  async getUpcomingIncomes(
+    familyId: string,
+    dias = 30,
+  ): Promise<PlannedAccount[]> {
+    const userIds = await this.getFamilyUserIds(familyId);
+    if (userIds.length === 0) return [];
+
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const limite = new Date(hoje);
+    limite.setDate(limite.getDate() + dias);
+
+    return this.plannedRepository
+      .createQueryBuilder('planned')
+      .where('planned.userId IN (:...userIds)', { userIds })
+      .andWhere("planned.type = 'income'")
+      .andWhere("planned.status IN ('pending', 'confirmed')")
+      .andWhere('planned.dueDate BETWEEN :hoje AND :limite', { hoje, limite })
+      .orderBy('planned.dueDate', 'ASC')
+      .getMany();
+  }
+
+  /** Cartões da casa, com o limite utilizado derivado das compras não pagas. */
+  async getCreditCards(familyId: string): Promise<
+    Array<{
+      id: string;
+      name: string;
+      bank: string;
+      limit: number;
+      used: number;
+      available: number;
+      closingDay: number;
+      dueDay: number;
+    }>
+  > {
+    const userIds = await this.getFamilyUserIds(familyId);
+    if (userIds.length === 0) return [];
+
+    const cards = await this.cardRepository
+      .createQueryBuilder('card')
+      .where('card.userId IN (:...userIds)', { userIds })
+      .getMany();
+
+    if (cards.length === 0) return [];
+
+    // Uma consulta agregada para todos os cartões: o utilizado é a soma das
+    // compras ainda não pagas de cada um.
+    const usos = await this.expenseRepository
+      .createQueryBuilder('expense')
+      .select('expense.creditCardId', 'cardId')
+      .addSelect('COALESCE(SUM(expense.amount), 0)', 'total')
+      .where('expense.userId IN (:...userIds)', { userIds })
+      .andWhere('expense.creditCardId IN (:...cardIds)', {
+        cardIds: cards.map((c) => c.id),
+      })
+      .andWhere('expense.isPaid = false')
+      .groupBy('expense.creditCardId')
+      .getRawMany();
+
+    const usoPorCartao = new Map<string, number>(
+      usos.map((u) => [u.cardId, Number(u.total) || 0]),
+    );
+
+    return cards.map((card) => {
+      const limite = Number(card.limit) || 0;
+      const usado = usoPorCartao.get(card.id) ?? 0;
+
+      return {
+        id: card.id,
+        name: card.name,
+        bank: card.bank,
+        limit: limite,
+        used: Math.round(usado * 100) / 100,
+        available: Math.round(Math.max(0, limite - usado) * 100) / 100,
+        closingDay: card.closingDay,
+        dueDay: card.dueDay,
+      };
+    });
+  }
+
+  /**
+   * Investimentos da casa.
+   *
+   * Importante para o assistente: este dinheiro NÃO é receita nem saldo em
+   * conta. Está aplicado, e responder "você tem R$ 30.000" somando investimento
+   * ao saldo daria uma disponibilidade que não existe.
+   */
+  async getInvestments(familyId: string): Promise<Goal[]> {
+    if (!familyId) return [];
+
+    return this.goalRepository
+      .createQueryBuilder('goal')
+      .where('goal.familyId = :familyId', { familyId })
+      .andWhere("goal.status <> 'CANCELLED'")
+      .orderBy('goal.currentAmount', 'DESC')
+      .getMany();
+  }
+
 }

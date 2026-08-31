@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
+import { Repository, Between, In } from 'typeorm';
 import { CashFlowSnapshot } from '../entities/cash-flow-snapshot.entity';
 import { User } from '../../../modules/users/entities/user.entity';
 import { Expense } from '../../../modules/expenses/entities/expense.entity';
@@ -8,6 +8,7 @@ import { Income } from '../../../modules/income/entities/income.entity';
 import { PlannedAccount } from '../../../modules/planned-accounts/entities/planned-account.entity';
 import { CreditCard } from '../../../modules/credit-cards/entities/credit-card.entity';
 import { Account } from '../../../modules/accounts/entities/account.entity';
+import { FamiliesService } from '../../../modules/families/families.service';
 import {
   CashFlowDayDto,
   CashFlowMonthDto,
@@ -32,7 +33,24 @@ export class CashFlowService {
     private creditCardRepository: Repository<CreditCard>,
     @InjectRepository(Account)
     private accountRepository: Repository<Account>,
+    private familiesService: FamiliesService,
   ) {}
+
+  /**
+   * Ids dos usuários cujos lançamentos entram neste fluxo de caixa.
+   *
+   * O caixa é da CASA. Sem isso, cada pessoa via um saldo diferente para o
+   * mesmo mês — o que torna o fluxo de caixa inútil justamente para o casal que
+   * divide as contas.
+   */
+  private async scopeUserIds(user: User): Promise<string[]> {
+    if (!user.familyId) {
+      return [user.id];
+    }
+
+    const memberIds = await this.familiesService.getMemberIds(user.familyId);
+    return memberIds.length > 0 ? memberIds : [user.id];
+  }
 
   /**
    * Get cash flow for a specific month
@@ -46,24 +64,29 @@ export class CashFlowService {
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0);
 
-    // Get all transactions for the month
+    // ESCOPO DE FAMÍLIA: o caixa é da casa, não de quem abriu a tela. Antes
+    // cada consulta somava só os próprios lançamentos — o salário da Giovanna
+    // não entrava no fluxo do Bruno, e o saldo projetado saía menor do que a
+    // realidade para os dois.
+    const userIds = await this.scopeUserIds(user);
+
     const expenses = await this.expenseRepository.find({
       where: {
-        userId: user.id,
+        userId: In(userIds),
         date: Between(startDate, endDate),
       },
     });
 
     const incomes = await this.incomeRepository.find({
       where: {
-        userId: user.id,
+        userId: In(userIds),
         date: Between(startDate, endDate),
       },
     });
 
     const plannedAccounts = await this.plannedAccountRepository.find({
       where: {
-        userId: user.id,
+        userId: In(userIds),
         dueDate: Between(startDate, endDate),
       },
     });
@@ -72,8 +95,22 @@ export class CashFlowService {
     const openingBalance = await this.getOpeningBalance(user, startDate);
 
     // Build daily snapshots
+    //
+    // Duas linhas de saldo caminham juntas:
+    //
+    //  - `saldoRealizado` só conhece o que já aconteceu (lançamentos de
+    //    despesa e receita). Responde "quanto tenho hoje se nada do previsto
+    //    acontecer".
+    //  - `saldoProjetado` acumula TAMBÉM o que está previsto. É a resposta que
+    //    a tela do Fluxo de Caixa precisa dar.
+    //
+    // O saldo projetado era calculado dia a dia sobre o saldo REALIZADO,
+    // descontando apenas as contas daquele dia. Assim o dia 20 ignorava tudo o
+    // que estava previsto do dia 1 ao 19, e a coluna nunca fechava: cada linha
+    // partia de uma base diferente da anterior.
     const days: CashFlowDayDto[] = [];
-    let runningBalance = openingBalance;
+    let saldoRealizado = openingBalance;
+    let saldoProjetado = openingBalance;
     const criticalDays = [];
 
     for (let day = 1; day <= endDate.getDate(); day++) {
@@ -86,8 +123,14 @@ export class CashFlowService {
       const dayIncomes = incomes.filter(
         i => i.date.getDate() === day,
       );
+      // Só o que ainda está previsto entra na projeção. Uma conta marcada como
+      // paga já virou lançamento real — contá-la de novo descontaria o mesmo
+      // dinheiro duas vezes. Cancelada, idem: deixou de ser compromisso.
       const dayPlanned = plannedAccounts.filter(
-        p => p.dueDate.getDate() === day,
+        p =>
+          p.dueDate.getDate() === day &&
+          p.status !== 'paid' &&
+          p.status !== 'cancelled',
       );
 
       // Colunas `decimal` voltam do PostgreSQL como string: sem Number() o
@@ -101,26 +144,42 @@ export class CashFlowService {
         (sum, e) => sum + Number(e.amount),
         0,
       );
-      const plannedAmount = dayPlanned.reduce(
-        (sum, p) => sum + Number(p.amount),
-        0,
-      );
 
-      const closingBalance = runningBalance + dailyIncome - dailyExpenses;
-      const projectedBalance = closingBalance - plannedAmount;
+      // O Planejado guarda os dois lados desde que as receitas recorrentes
+      // passaram a ser projetadas. Somar tudo como saída debitaria o salário
+      // do saldo previsto — exatamente o oposto do que deve acontecer.
+      const plannedAmount = dayPlanned
+        .filter((p) => p.type !== 'income')
+        .reduce((sum, p) => sum + Number(p.amount), 0);
 
-      // Check if critical day
+      const plannedIncomeAmount = dayPlanned
+        .filter((p) => p.type === 'income')
+        .reduce((sum, p) => sum + Number(p.amount), 0);
+
+      const aberturaProjetada = saldoProjetado;
+
+      saldoRealizado = saldoRealizado + dailyIncome - dailyExpenses;
+      saldoProjetado =
+        saldoProjetado +
+        dailyIncome -
+        dailyExpenses +
+        plannedIncomeAmount -
+        plannedAmount;
+
+      // Dia crítico é sobre dinheiro SAINDO: uma entrada prevista alta não
+      // torna o dia arriscado, torna o contrário.
       const totalPayments = dailyExpenses + plannedAmount;
       const isCriticalDay = totalPayments > openingBalance * 0.15; // 15% of opening balance
 
       const daySnapshot: CashFlowDayDto = {
         date: currentDate,
-        openingBalance: runningBalance,
+        openingBalance: aberturaProjetada,
         dailyIncome,
         dailyExpenses,
         plannedAccountsAmount: plannedAmount,
-        closingBalance,
-        projectedBalance,
+        plannedIncomeAmount,
+        closingBalance: saldoRealizado,
+        projectedBalance: saldoProjetado,
         transactionCount: dayExpenses.length + dayIncomes.length + dayPlanned.length,
         isCriticalDay,
         criticalDayReason: isCriticalDay
@@ -137,17 +196,22 @@ export class CashFlowService {
           totalPayments,
         });
       }
-
-      runningBalance = closingBalance;
     }
 
     // Calculate totals
     const totalIncome = incomes.reduce((sum, i) => sum + Number(i.amount), 0);
     const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
-    const totalPlanned = plannedAccounts.reduce(
-      (sum, p) => sum + Number(p.amount),
-      0,
+    const previstas = plannedAccounts.filter(
+      (p) => p.status !== 'paid' && p.status !== 'cancelled',
     );
+
+    const totalPlanned = previstas
+      .filter((p) => p.type !== 'income')
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+
+    const totalPlannedIncome = previstas
+      .filter((p) => p.type === 'income')
+      .reduce((sum, p) => sum + Number(p.amount), 0);
     const avgDailyExpenses = totalExpenses / endDate.getDate();
 
     return {
@@ -157,7 +221,9 @@ export class CashFlowService {
       openingBalance,
       totalIncome,
       totalExpenses,
-      closingBalance: runningBalance,
+      totalPlanned,
+      totalPlannedIncome,
+      closingBalance: saldoRealizado,
       avgDailyExpenses,
       criticalDays,
     };
@@ -356,8 +422,13 @@ export class CashFlowService {
       currentBalance: balance,
       totalIncome: currentMonth.totalIncome,
       totalExpenses: currentMonth.totalExpenses,
-      totalPlanned: currentMonth.days.reduce((sum, d) => sum + d.plannedAccountsAmount, 0),
-      projectedEndOfMonth: currentMonth.closingBalance,
+      totalPlanned: currentMonth.totalPlanned,
+      // Fim de mês PREVISTO: o saldo projetado do último dia, que já acumula
+      // tudo o que está por acontecer. `closingBalance` só conhece o realizado
+      // e respondia sempre como se nenhuma conta fosse vencer.
+      projectedEndOfMonth:
+        currentMonth.days[currentMonth.days.length - 1]?.projectedBalance ??
+        currentMonth.closingBalance,
       criticalDaysCount: currentMonth.criticalDays.length,
       nextCriticalDay: currentMonth.criticalDays[0]?.date,
       nextCriticalDayAmount: currentMonth.criticalDays[0]?.totalPayments,

@@ -446,18 +446,32 @@ export class ForecastingService {
         .filter(exp => exp.date.getDate() === currentDate.getDate())
         .reduce((sum, exp) => sum + exp.amount, 0);
 
-      // Add planned for this date
-      const dayPlanned = planned
-        .filter(p => p.dueDate.getDate() === currentDate.getDate())
-        .reduce((sum, p) => sum + p.amount, 0);
+      // O Planejado guarda os dois lados desde que as receitas recorrentes
+      // passaram a ser projetadas. Sem separar, o salário previsto seria
+      // DEBITADO do saldo — a previsão daria exatamente o contrário.
+      const doDia = planned.filter(
+        p =>
+          p.dueDate.getDate() === currentDate.getDate() &&
+          p.status !== 'paid' &&
+          p.status !== 'cancelled',
+      );
+
+      const dayPlanned = doDia
+        .filter(p => p.type !== 'income')
+        .reduce((sum, p) => sum + Number(p.amount), 0);
+
+      const dayPlannedIncome = doDia
+        .filter(p => p.type === 'income')
+        .reduce((sum, p) => sum + Number(p.amount), 0);
 
       // Update balance
-      balance = balance + dayIncome - (dayExpenses + dayPlanned);
+      balance =
+        balance + dayIncome + dayPlannedIncome - (dayExpenses + dayPlanned);
 
       projections.push({
         date: new Date(currentDate),
         projectedBalance: balance,
-        income: dayIncome,
+        income: dayIncome + dayPlannedIncome,
         expenses: dayExpenses + dayPlanned,
         minBalance: Math.min(balance, ...projections.map(p => p.projectedBalance)),
         week: Math.ceil((i + 1) / 7),

@@ -112,6 +112,7 @@ export default function ReceitasPage() {
     createIncome,
     updateIncome,
     deleteIncome,
+    setIncomeRecurrence,
     clearError,
   } = useIncome();
 
@@ -125,6 +126,35 @@ export default function ReceitasPage() {
 
   // Confirmação inline de exclusão — sem `window.confirm`, que trava automação
   const [confirmingDeletionId, setConfirmingDeletionId] = useState<string | null>(null);
+
+  /** Id da receita cuja recorrência está sendo encerrada ou retomada. */
+  const [alterandoRecorrenciaId, setAlterandoRecorrenciaId] = useState<
+    string | null
+  >(null);
+
+  /**
+   * Encerra ou retoma a projeção da receita nos próximos meses.
+   *
+   * Útil na troca de emprego: o salário antigo para de aparecer no Planejado
+   * sem que o histórico do que já foi recebido se perca.
+   */
+  const handleToggleRecorrencia = async (income: IncomeDto) => {
+    const encerrando = !income.recurrenceCancelledAt;
+    setAlterandoRecorrenciaId(income.id);
+    setFeedback(null);
+    try {
+      await setIncomeRecurrence(income.id, !encerrando);
+      setFeedback(
+        encerrando
+          ? `"${income.description}" não será mais projetada nos próximos meses.`
+          : `"${income.description}" voltou a ser projetada para os próximos 12 meses.`,
+      );
+    } catch {
+      // A mensagem já vem pelo `error` do hook.
+    } finally {
+      setAlterandoRecorrenciaId(null);
+    }
+  };
 
   // Pré-seleciona a primeira conta assim que a lista chega
   useEffect(() => {
@@ -797,7 +827,13 @@ export default function ReceitasPage() {
                         </span>
                       )}
                       {income.isRecurring && (
-                        <span className="px-2 py-1 rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-200 flex items-center gap-1">
+                        <span
+                          className={`px-2 py-1 rounded flex items-center gap-1 ${
+                            income.recurrenceCancelledAt
+                              ? 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 line-through'
+                              : 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-200'
+                          }`}
+                        >
                           <Repeat className="w-3 h-3" />
                           Recorrente
                           {income.frequency
@@ -826,6 +862,27 @@ export default function ReceitasPage() {
                     >
                       Editar
                     </button>
+                    {income.isRecurring && (
+                      <button
+                        onClick={() => handleToggleRecorrencia(income)}
+                        disabled={alterandoRecorrenciaId === income.id}
+                        title={
+                          income.recurrenceCancelledAt
+                            ? 'Voltar a projetar esta receita nos próximos meses'
+                            : 'Parar de projetar esta receita nos próximos meses'
+                        }
+                        className="px-3 py-1.5 rounded text-xs font-medium border border-indigo-200 dark:border-indigo-900 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                      >
+                        {alterandoRecorrenciaId === income.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Repeat className="w-3.5 h-3.5" />
+                        )}
+                        {income.recurrenceCancelledAt
+                          ? 'Retomar recorrência'
+                          : 'Cancelar recorrência'}
+                      </button>
+                    )}
                     {confirmingDeletionId !== income.id && (
                       <button
                         onClick={() => setConfirmingDeletionId(income.id)}

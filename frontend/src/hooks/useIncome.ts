@@ -244,9 +244,38 @@ export function useIncome() {
     refreshAll();
   }, [refreshAll]);
 
+  /**
+   * Encerra ou retoma a recorrência da receita.
+   *
+   * A receita continua na lista — é dinheiro que entrou. O que muda é a
+   * projeção das entradas dos próximos meses no Planejado.
+   */
+  const setIncomeRecurrence = useCallback(
+    async (id: string, active: boolean) => {
+      setState(prev => ({ ...prev, isSaving: true, error: null }));
+      try {
+        const atualizada = await apiClient.setIncomeRecurrence(id, active);
+        setState(prev => ({
+          ...prev,
+          incomes: prev.incomes.map(i =>
+            i.id === id ? { ...i, ...atualizada } : i,
+          ),
+          isSaving: false,
+        }));
+        return atualizada;
+      } catch (err) {
+        const errorMsg = getApiErrorMessage(err, 'Erro ao alterar a recorrência');
+        setState(prev => ({ ...prev, error: errorMsg, isSaving: false }));
+        throw new Error(errorMsg);
+      }
+    },
+    [],
+  );
+
   return {
     ...state,
     fetchIncomes,
+    setIncomeRecurrence,
     fetchTypeBreakdown,
     fetchRecurringMonthly,
     refreshAll,
