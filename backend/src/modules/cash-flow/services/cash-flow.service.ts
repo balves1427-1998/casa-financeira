@@ -164,6 +164,56 @@ export class CashFlowService {
   }
 
   /**
+   * Fluxo de caixa de um PERÍODO, atravessando a virada de mês.
+   *
+   * `getMonthCashFlow` responde por competência, que é o recorte certo para a
+   * tela do Fluxo de Caixa. Já a recomendação de compra olha os próximos 30
+   * dias — que, perguntados no dia 25, caem quase todos no mês seguinte.
+   *
+   * Os dias vêm concatenados na ordem, e os dias críticos de todos os meses
+   * envolvidos são reunidos numa lista só.
+   */
+  private async getPeriodoCashFlow(
+    user: User,
+    inicio: Date,
+    fim: Date,
+  ): Promise<CashFlowMonthDto> {
+    const meses: CashFlowMonthDto[] = [];
+
+    const cursor = new Date(inicio.getFullYear(), inicio.getMonth(), 1);
+    const ultimo = new Date(fim.getFullYear(), fim.getMonth(), 1);
+
+    // Teto de segurança: uma janela absurda informada pelo cliente não pode
+    // virar centenas de consultas.
+    for (let i = 0; i < 13 && cursor <= ultimo; i++) {
+      meses.push(
+        await this.getMonthCashFlow(
+          user,
+          cursor.getMonth() + 1,
+          cursor.getFullYear(),
+        ),
+      );
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+
+    if (meses.length === 0) {
+      return this.getMonthCashFlow(
+        user,
+        inicio.getMonth() + 1,
+        inicio.getFullYear(),
+      );
+    }
+
+    const primeiro = meses[0];
+
+    return {
+      ...primeiro,
+      days: meses.flatMap((mes) => mes.days),
+      criticalDays: meses.flatMap((mes) => mes.criticalDays),
+    };
+  }
+
+  /**
    * Get best day to make a purchase
    */
   async getBestDayToShop(
@@ -174,15 +224,27 @@ export class CashFlowService {
       throw new BadRequestException('Desired amount must be greater than 0');
     }
 
-    const startDate = dto.startDate || new Date();
-    const endDate = dto.endDate || new Date(startDate.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days ahead
+    const startDate = new Date(dto.startDate || new Date());
+    // Normalizado para o INÍCIO do dia. Os dias do fluxo de caixa vêm à
+    // meia-noite, então comparar com a hora atual excluía o próprio dia de
+    // hoje. No dia 31 do mês isso esvaziava a lista inteira e a rota quebrava
+    // com "Cannot read properties of undefined (reading 'date')".
+    startDate.setHours(0, 0, 0, 0);
+
+    const endDate = new Date(
+      dto.endDate || new Date(startDate.getTime() + 30 * 24 * 60 * 60 * 1000),
+    );
+    endDate.setHours(23, 59, 59, 999);
+
     const minBalance = dto.minimumBalanceThreshold || 2000;
 
-    // Get cash flow for the period
-    const monthCashFlow = await this.getMonthCashFlow(
+    // A janela de 30 dias quase sempre atravessa a virada do mês. Consultar
+    // apenas o mês de início deixava de fora justamente os dias recomendados
+    // quando a pergunta era feita perto do fim do mês.
+    const monthCashFlow = await this.getPeriodoCashFlow(
       user,
-      startDate.getMonth() + 1,
-      startDate.getFullYear(),
+      startDate,
+      endDate,
     );
 
     // Find best days (high projected balance, no critical days)
@@ -203,6 +265,15 @@ export class CashFlowService {
         .sort((a, b) => b.projectedBalance - a.projectedBalance);
 
       const recommendedDay = riskyDays[0];
+
+      // Sem nenhum dia no período não há o que recomendar. Antes o código
+      // seguia adiante e estourava ao ler `.date` de `undefined` — devolver um
+      // 500 para uma pergunta legítima. Dizer que não há base é mais honesto.
+      if (!recommendedDay) {
+        throw new BadRequestException(
+          'Não há dias de fluxo de caixa no período informado para calcular a recomendação.',
+        );
+      }
 
       return {
         recommendedDate: recommendedDay.date,

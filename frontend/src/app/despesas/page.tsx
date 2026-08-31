@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import { useExpenses, type Expense } from '@/hooks/useExpenses';
 import { useAccounts } from '@/hooks/useAccounts';
+import { usePlannedAccounts } from '@/hooks/usePlannedAccounts';
 import { useCreditCards } from '@/hooks/useCreditCards';
 import { useCategories } from '@/hooks/useCategories';
 import {
@@ -142,9 +143,11 @@ export default function DespesasPage() {
     updateExpense,
     deleteExpense,
     setExpensePaid,
+    setExpenseRecurrence,
     clearError,
   } = useExpenses();
 
+  const { planned, fetchPlanned: refetchPlanned } = usePlannedAccounts();
   const { accounts, isLoading: accountsLoading } = useAccounts();
   const { cards } = useCreditCards();
   const { categories } = useCategories();
@@ -162,6 +165,37 @@ export default function DespesasPage() {
   const [alterandoPagamentoId, setAlterandoPagamentoId] = useState<string | null>(
     null,
   );
+
+  /** Id da despesa cuja recorrência está sendo encerrada ou retomada. */
+  const [alterandoRecorrenciaId, setAlterandoRecorrenciaId] = useState<
+    string | null
+  >(null);
+
+  /**
+   * Encerra ou retoma a série recorrente.
+   *
+   * O `refetchPlanned` no fim é o que faz o bloco de previstas refletir a
+   * mudança na hora — sem ele, os meses futuros continuariam listados depois
+   * de o usuário cancelar.
+   */
+  const handleToggleRecorrencia = async (expense: Expense) => {
+    const encerrando = !expense.recurrenceCancelledAt;
+    setAlterandoRecorrenciaId(expense.id);
+    setFeedback(null);
+    try {
+      await setExpenseRecurrence(expense.id, !encerrando);
+      await refetchPlanned({ silent: true });
+      setFeedback(
+        encerrando
+          ? `"${expense.description}" não será mais projetada nos próximos meses. A despesa deste mês continua no histórico.`
+          : `"${expense.description}" voltou a ser projetada para os próximos 12 meses.`,
+      );
+    } catch {
+      // A mensagem já vem pelo `error` do hook.
+    } finally {
+      setAlterandoRecorrenciaId(null);
+    }
+  };
 
   /**
    * Alterna a situação de pagamento pelo ícone da lista.
@@ -256,6 +290,45 @@ export default function DespesasPage() {
   const totalFiltrado = useMemo(
     () => despesasFiltradas.reduce((sum, e) => sum + toExpenseAmount(e.amount), 0),
     [despesasFiltradas],
+  );
+
+  /**
+   * Ocorrências ainda não realizadas das despesas recorrentes.
+   *
+   * Vêm do Planejado, onde a série é projetada. Aparecem aqui porque é nesta
+   * tela que se pergunta "o que tenho de Netflix em outubro?" — mas ficam num
+   * bloco à parte e **fora do total gasto**: nada saiu do caixa ainda. Contá-las
+   * como despesa faria outubro mostrar dinheiro gasto que ainda está na conta.
+   */
+  const previstasFiltradas = useMemo(() => {
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+
+    const inicio = filtroInicio ? new Date(`${filtroInicio}T00:00:00`) : hoje;
+    const fim = filtroFim ? new Date(`${filtroFim}T23:59:59`) : null;
+
+    return planned
+      .filter(conta => {
+        // Só projeções de recorrência; contas cadastradas à mão têm a sua tela.
+        if (!conta.recurringExpenseId) return false;
+        if (conta.status === 'paid' || conta.status === 'cancelled') return false;
+        if (filtroCategoria && conta.category !== filtroCategoria) return false;
+        if (filtroResponsavel && conta.responsible !== filtroResponsavel)
+          return false;
+
+        const vencimento = new Date(conta.dueDate);
+        if (vencimento < inicio) return false;
+        if (fim && vencimento > fim) return false;
+        return true;
+      })
+      .sort(
+        (a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime(),
+      );
+  }, [planned, filtroCategoria, filtroResponsavel, filtroInicio, filtroFim]);
+
+  const totalPrevisto = useMemo(
+    () => previstasFiltradas.reduce((sum, p) => sum + Number(p.amount || 0), 0),
+    [previstasFiltradas],
   );
 
   const totalDoMes = useMemo(() => {
@@ -1076,12 +1149,14 @@ export default function DespesasPage() {
                   <p className="mt-3 flex items-start gap-2 rounded bg-indigo-50 dark:bg-indigo-950/30 p-3 text-xs text-indigo-800 dark:text-indigo-200">
                     <Repeat className="w-4 h-4 shrink-0 mt-px" />
                     <span>
-                      A próxima ocorrência entra sozinha no{' '}
+                      Os próximos 12 meses entram sozinhos no{' '}
                       <Link href="/planned" className="underline font-medium">
                         Planejado
                       </Link>
-                      . Não é preciso cadastrá-la lá de novo — se já existir uma
-                      conta igual para o mesmo vencimento, nada é duplicado.
+                      , e a projeção se renova conforme o tempo passa — a despesa
+                      se repete até você cancelar a recorrência, pelo botão na
+                      lista de lançamentos. Se a casa já tiver a mesma conta para
+                      o mesmo vencimento, nada é duplicado.
                     </span>
                   </p>
                 </div>
@@ -1342,6 +1417,27 @@ export default function DespesasPage() {
                     >
                       Editar
                     </button>
+                    {expense.isRecurring && (
+                      <button
+                        onClick={() => handleToggleRecorrencia(expense)}
+                        disabled={alterandoRecorrenciaId === expense.id}
+                        title={
+                          expense.recurrenceCancelledAt
+                            ? 'Voltar a projetar esta despesa nos próximos meses'
+                            : 'Parar de projetar esta despesa nos próximos meses'
+                        }
+                        className="px-3 py-1.5 rounded text-xs font-medium border border-indigo-200 dark:border-indigo-900 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                      >
+                        {alterandoRecorrenciaId === expense.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Repeat className="w-3.5 h-3.5" />
+                        )}
+                        {expense.recurrenceCancelledAt
+                          ? 'Retomar recorrência'
+                          : 'Cancelar recorrência'}
+                      </button>
+                    )}
                     {confirmingDeletionId !== expense.id && (
                       <button
                         onClick={() => setConfirmingDeletionId(expense.id)}
@@ -1391,6 +1487,74 @@ export default function DespesasPage() {
           </ul>
         )}
       </div>
+
+      {/*
+        Ocorrências previstas das despesas recorrentes.
+
+        Ficam num bloco separado, e não misturadas à lista acima, porque ainda
+        não aconteceram: entram no Fluxo de Caixa como compromisso, mas NÃO no
+        total gasto. Misturá-las faria outubro parecer já gasto.
+      */}
+      {previstasFiltradas.length > 0 && (
+        <div className="rounded-lg border border-indigo-200 dark:border-indigo-900 bg-indigo-50/40 dark:bg-indigo-950/20 p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3 mb-1">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+              <Repeat className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+              Ainda vão acontecer
+            </h2>
+            <div className="text-right">
+              <p className="text-xs text-gray-600 dark:text-gray-400">
+                {previstasFiltradas.length}{' '}
+                {previstasFiltradas.length === 1 ? 'ocorrência' : 'ocorrências'}
+              </p>
+              <p className="text-lg font-bold text-indigo-700 dark:text-indigo-300">
+                {formatBRL(totalPrevisto)}
+              </p>
+            </div>
+          </div>
+
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            Projeções das suas despesas recorrentes. Elas{' '}
+            <strong>não entram no total gasto</strong> — o dinheiro ainda está na
+            conta. Viram despesa de verdade quando você marcar como paga, em{' '}
+            <Link href="/planned" className="underline font-medium">
+              Planejado
+            </Link>
+            .
+          </p>
+
+          <ul className="space-y-2">
+            {previstasFiltradas.map(prevista => (
+              <li
+                key={prevista.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-indigo-200/70 dark:border-indigo-900/70 bg-white dark:bg-gray-900 px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium text-gray-900 dark:text-white truncate">
+                    {prevista.description}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 mt-1 text-xs">
+                    <span className="px-2 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-200">
+                      Prevista para {formatDateBR(prevista.dueDate)}
+                    </span>
+                    {prevista.category && (
+                      <span className="px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                        {prevista.category}
+                      </span>
+                    )}
+                    <span className="px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 capitalize">
+                      {prevista.responsible}
+                    </span>
+                  </div>
+                </div>
+                <span className="text-base font-semibold text-indigo-700 dark:text-indigo-300">
+                  {formatBRL(Number(prevista.amount || 0))}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { PlannedAccount } from '../planned-accounts/entities/planned-account.ent
 import { ExpensesService } from './expenses.service';
 import { ExpensesController } from './expenses.controller';
 import { FamiliesModule } from '../families/families.module';
+import { RecurrenceModule } from '../recurrence/recurrence.module';
 
 /**
  * Módulo de Despesas.
@@ -21,6 +22,7 @@ import { FamiliesModule } from '../families/families.module';
   imports: [
     TypeOrmModule.forFeature([Expense, PlannedAccount]),
     FamiliesModule,
+    RecurrenceModule,
   ],
   providers: [ExpensesService],
   controllers: [ExpensesController],

@@ -23,6 +23,11 @@ export interface PlannedAccount {
   priority: number;
   isRecurring: boolean;
   frequency?: string;
+  /**
+   * Despesa recorrente que projetou esta ocorrência.
+   * Nulo nas contas cadastradas à mão.
+   */
+  recurringExpenseId?: string | null;
   paymentDate?: string;
   createdAt: string;
   updatedAt: string;

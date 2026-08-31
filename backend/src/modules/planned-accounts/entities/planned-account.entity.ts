@@ -63,6 +63,16 @@ export class PlannedAccount {
   @Column({ nullable: true })
   observation?: string;
 
+  /**
+   * Despesa recorrente que projetou esta ocorrência.
+   *
+   * Nulo nas contas cadastradas à mão. É o vínculo que distingue uma projeção
+   * de um compromisso digitado pelo usuário — e o que permite encerrar a série
+   * sem tocar no que ele criou manualmente.
+   */
+  @Column({ nullable: true })
+  recurringExpenseId?: string;
+
   @Column({ nullable: true })
   paymentDate?: Date;
 

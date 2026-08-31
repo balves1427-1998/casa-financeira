@@ -597,6 +597,19 @@ class ApiClient {
     return response.data;
   }
 
+  /**
+   * Encerra ou retoma a recorrência de uma despesa.
+   *
+   * Cancelar não apaga a despesa — ela continua sendo um gasto realizado. O que
+   * termina é a projeção dos meses seguintes.
+   */
+  async setExpenseRecurrence(id: string, active: boolean) {
+    const response = await this.client.patch(`/expenses/${id}/recurrence`, {
+      active,
+    });
+    return response.data;
+  }
+
   /** Marca ou desmarca uma despesa como paga. */
   async setExpensePaid(id: string, isPaid: boolean) {
     const response = await this.client.patch(`/expenses/${id}/pay`, { isPaid });

@@ -33,6 +33,8 @@ export interface Expense {
   paidAt?: string | null;
   /** Conta do Planejado vinculada, quando a despesa é recorrente. */
   plannedAccountId?: string | null;
+  /** Preenchido quando a série recorrente foi encerrada. */
+  recurrenceCancelledAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -229,6 +231,38 @@ export const useExpenses = () => {
   );
 
   /**
+   * Encerra ou retoma a recorrência.
+   *
+   * A despesa continua na lista — ela é um gasto que aconteceu. O que muda é a
+   * projeção dos meses seguintes no Planejado.
+   */
+  const setExpenseRecurrence = useCallback(
+    async (id: string, active: boolean) => {
+      try {
+        setIsSaving(true);
+        setError(null);
+        const updated = normalizeExpense(
+          await apiClient.setExpenseRecurrence(id, active),
+        );
+        setExpenses((prev) =>
+          prev.map((expense) => (expense.id === id ? updated : expense)),
+        );
+        return updated;
+      } catch (err) {
+        const errorMessage = getApiErrorMessage(
+          err,
+          'Erro ao alterar a recorrência',
+        );
+        setError(errorMessage);
+        throw new Error(errorMessage);
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [],
+  );
+
+  /**
    * Quantas contas a casa pagou no mês, e quanto somaram.
    *
    * A contagem é feita no backend porque ele enxerga todos os lançamentos da
@@ -377,6 +411,7 @@ export const useExpenses = () => {
     updateExpense,
     deleteExpense,
     setExpensePaid,
+    setExpenseRecurrence,
     getPaidSummary,
     fetchByCategory,
     fetchByResponsible,

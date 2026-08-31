@@ -125,6 +125,19 @@ export class SetExpensePaidDto {
 }
 
 /**
+ * Encerra ou retoma a recorrência de uma despesa.
+ *
+ * `active: false` para de projetar os meses seguintes e limpa as ocorrências
+ * futuras ainda não pagas. A despesa em si permanece — ela é um gasto que
+ * aconteceu.
+ */
+export class SetRecurrenceDto {
+  @IsNotEmpty()
+  @IsBoolean()
+  active: boolean;
+}
+
+/**
  * DTO de atualização de despesa.
  *
  * Mesma correção aplicada em contas: `Partial<CreateExpenseDto>` no controller

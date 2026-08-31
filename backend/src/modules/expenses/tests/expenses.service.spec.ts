@@ -1,11 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ExpensesService } from '../expenses.service';
 import { Expense } from '../entities/expense.entity';
 import { FamiliesService } from '../../families/families.service';
 import { User } from '../../users/entities/user.entity';
 import { PlannedAccount } from '../../planned-accounts/entities/planned-account.entity';
+import { RecurrenceService } from '../../recurrence/recurrence.service';
 
 /**
  * Testes unitários do ExpensesService — escopo de leitura por FAMÍLIA.
@@ -128,6 +133,18 @@ describe('ExpensesService', () => {
     update: jest.fn(),
   };
 
+  /**
+   * A projeção da série recorrente tem testes próprios em
+   * `modules/recurrence`. Aqui interessa apenas que o ExpensesService a aciona
+   * na hora certa — e que uma falha dela não derruba o lançamento da despesa.
+   */
+  const mockRecurrenceService = {
+    sincronizarSerie: jest.fn(async () => 12),
+    cancelarSerie: jest.fn(async () => 12),
+    reativarSerie: jest.fn(async () => 12),
+    sincronizarTodas: jest.fn(async () => 0),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
     queryBuilder = criarQueryBuilder();
@@ -155,6 +172,7 @@ describe('ExpensesService', () => {
           useValue: mockPlannedAccountsRepository,
         },
         { provide: FamiliesService, useValue: mockFamiliesService },
+        { provide: RecurrenceService, useValue: mockRecurrenceService },
       ],
     }).compile();
 
@@ -412,14 +430,14 @@ describe('ExpensesService', () => {
   });
 
   /**
-   * Despesa recorrente → conta no Planejado.
+   * Despesa recorrente aciona a série.
    *
-   * O que se quer garantir: a conta gerada é a PRÓXIMA ocorrência (a atual já
-   * está registrada como despesa — duplicá-la faria o fluxo de caixa contar a
-   * mesma saída duas vezes), e uma conta equivalente já existente na casa
-   * impede a criação de uma segunda.
+   * A projeção em si (12 meses, sem duplicar, avanço de mês correto) é testada
+   * em `modules/recurrence`. Aqui o que importa é o contrato entre os dois: a
+   * despesa recorrente ACIONA a série, a comum não, e uma falha na projeção não
+   * pode derrubar o lançamento — o gasto é o fato, a projeção é derivada dele.
    */
-  describe('despesa recorrente gera conta planejada', () => {
+  describe('despesa recorrente aciona a série', () => {
     const montarDespesa = (extra: Partial<Expense> = {}) => {
       const base = {
         id: 'expense-aluguel',
@@ -442,63 +460,82 @@ describe('ExpensesService', () => {
       return base;
     };
 
-    it('cria a conta planejada no vencimento do mês seguinte', async () => {
-      montarDespesa();
+    it('projeta a série no escopo da família', async () => {
+      const despesa = montarDespesa();
 
       await service.create(BRUNO, {} as any);
 
-      expect(mockPlannedAccountsRepository.save).toHaveBeenCalledTimes(1);
-
-      const criada = mockPlannedAccountsRepository.create.mock.calls[0][0];
-      expect(criada.description).toBe('Aluguel');
-      expect(criada.amount).toBe(1800);
-      expect(criada.status).toBe('pending');
-      // Setembro, não agosto: a ocorrência de agosto é a despesa em si.
-      expect(criada.dueDate.getMonth()).toBe(8);
-      expect(criada.dueDate.getDate()).toBe(5);
+      expect(mockRecurrenceService.sincronizarSerie).toHaveBeenCalledWith(
+        despesa,
+        [BRUNO.id, GIOVANNA.id],
+      );
     });
 
-    it('não duplica quando a casa já tem a mesma conta para o vencimento', async () => {
-      montarDespesa();
-      plannedQueryBuilder.getOne.mockResolvedValue({ id: 'planned-existente' });
-
-      await service.create(BRUNO, {} as any);
-
-      expect(mockPlannedAccountsRepository.save).not.toHaveBeenCalled();
-      // A busca por duplicidade olha a família inteira, não só quem lançou.
-      expect(plannedQueryBuilder.state.params.userIds).toEqual([
-        BRUNO.id,
-        GIOVANNA.id,
-      ]);
-    });
-
-    it('não cria nada quando a despesa não é recorrente', async () => {
+    it('não aciona a série quando a despesa não é recorrente', async () => {
       montarDespesa({ isRecurring: false } as Partial<Expense>);
 
       await service.create(BRUNO, {} as any);
 
-      expect(mockPlannedAccountsRepository.save).not.toHaveBeenCalled();
+      expect(mockRecurrenceService.sincronizarSerie).not.toHaveBeenCalled();
     });
 
-    it('o mês seguinte nunca escorrega para o mês errado (31/01 → 28/02)', async () => {
-      montarDespesa({ date: new Date('2026-01-31T00:00:00.000Z') } as Partial<Expense>);
-
-      await service.create(BRUNO, {} as any);
-
-      const criada = mockPlannedAccountsRepository.create.mock.calls[0][0];
-      // `setMonth` puro levaria 31/01 para 03/03. Tem que parar em fevereiro.
-      expect(criada.dueDate.getMonth()).toBe(1);
-      expect(criada.dueDate.getDate()).toBe(28);
-    });
-
-    it('a falha ao planejar não derruba o lançamento da despesa', async () => {
+    it('a falha ao projetar não derruba o lançamento da despesa', async () => {
       montarDespesa();
-      mockPlannedAccountsRepository.save.mockRejectedValueOnce(
+      mockRecurrenceService.sincronizarSerie.mockRejectedValueOnce(
         new Error('banco indisponível'),
       );
 
-      // O gasto é o fato; o planejamento é derivado dele.
       await expect(service.create(BRUNO, {} as any)).resolves.toBeDefined();
+    });
+  });
+
+  describe('cancelar e retomar a recorrência', () => {
+    const RECORRENTE = {
+      id: 'expense-bruno',
+      userId: BRUNO.id,
+      description: 'Netflix',
+      amount: 55.9,
+      isRecurring: true,
+    } as Expense;
+
+    beforeEach(() => {
+      queryBuilder.getOne.mockResolvedValue({ ...RECORRENTE });
+    });
+
+    it('cancelar encerra a série', async () => {
+      await service.setRecurrenceActive('expense-bruno', BRUNO, false);
+
+      expect(mockRecurrenceService.cancelarSerie).toHaveBeenCalled();
+      expect(mockRecurrenceService.reativarSerie).not.toHaveBeenCalled();
+    });
+
+    it('retomar reprojeta a série', async () => {
+      await service.setRecurrenceActive('expense-bruno', BRUNO, true);
+
+      expect(mockRecurrenceService.reativarSerie).toHaveBeenCalled();
+      expect(mockRecurrenceService.cancelarSerie).not.toHaveBeenCalled();
+    });
+
+    it('recusa despesa que não foi lançada como recorrente', async () => {
+      queryBuilder.getOne.mockResolvedValue({
+        ...RECORRENTE,
+        isRecurring: false,
+      });
+
+      await expect(
+        service.setRecurrenceActive('expense-bruno', BRUNO, false),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('só quem lançou pode encerrar a recorrência', async () => {
+      queryBuilder.getOne.mockResolvedValue({
+        ...DESPESA_DA_GIOVANNA,
+        isRecurring: true,
+      });
+
+      await expect(
+        service.setRecurrenceActive('expense-giovanna', BRUNO, false),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 

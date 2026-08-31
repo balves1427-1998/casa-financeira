@@ -94,6 +94,16 @@ export class Expense {
   @Column({ nullable: true })
   plannedAccountId?: string;
 
+  /**
+   * Quando a série recorrente foi encerrada.
+   *
+   * Nulo enquanto a recorrência está ativa. Não é `deletedAt`: a despesa
+   * original continua valendo como gasto realizado — o que acaba é a projeção
+   * dos meses seguintes.
+   */
+  @Column({ nullable: true })
+  recurrenceCancelledAt?: Date;
+
   @Column({
     type: 'enum',
     enum: ['manual', 'bank_statement', 'credit_card', 'import', 'recurring'],

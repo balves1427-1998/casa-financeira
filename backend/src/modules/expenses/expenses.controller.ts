@@ -21,6 +21,7 @@ import { ExpensesService } from './expenses.service';
 import {
   CreateExpenseDto,
   SetExpensePaidDto,
+  SetRecurrenceDto,
   UpdateExpenseDto,
 } from './dtos/create-expense.dto';
 
@@ -187,6 +188,22 @@ export class ExpensesController {
     @Body() dto: SetExpensePaidDto,
   ) {
     return this.expensesService.setPaid(id, user, dto.isPaid);
+  }
+
+  /**
+   * Encerra ou retoma a recorrência.
+   *
+   * Cancelar não apaga a despesa: ela continua sendo um gasto realizado. O que
+   * termina é a projeção dos meses seguintes.
+   */
+  @Patch(':id/recurrence')
+  @HttpCode(HttpStatus.OK)
+  async setRecurrence(
+    @Param('id') id: string,
+    @GetCurrentUser() user: User,
+    @Body() dto: SetRecurrenceDto,
+  ) {
+    return this.expensesService.setRecurrenceActive(id, user, dto.active);
   }
 
   @Delete(':id')

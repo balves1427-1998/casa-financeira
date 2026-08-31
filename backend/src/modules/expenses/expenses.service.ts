@@ -3,6 +3,7 @@ import {
   Logger,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -11,6 +12,7 @@ import { CreateExpenseDto, UpdateExpenseDto } from './dtos/create-expense.dto';
 import { User } from '../users/entities/user.entity';
 import { FamiliesService } from '../families/families.service';
 import { PlannedAccount } from '../planned-accounts/entities/planned-account.entity';
+import { RecurrenceService } from '../recurrence/recurrence.service';
 
 /**
  * Service de despesas.
@@ -33,6 +35,7 @@ export class ExpensesService {
     @InjectRepository(PlannedAccount)
     private plannedAccountsRepository: Repository<PlannedAccount>,
     private familiesService: FamiliesService,
+    private recurrenceService: RecurrenceService,
   ) {}
 
   async create(
@@ -58,14 +61,58 @@ export class ExpensesService {
     const saved = await this.expensesRepository.save(expense);
     this.logger.log(`Despesa ${saved.id} criada por ${user.id}`);
 
-    // Despesa recorrente vira compromisso no Planejado automaticamente. Antes
-    // era preciso cadastrar duas vezes — e quem esquecia de um dos dois lados
-    // via o fluxo de caixa errado.
+    // Despesa recorrente abre uma SÉRIE: as ocorrências dos próximos doze meses
+    // entram no Planejado de uma vez, e a janela é reabastecida conforme o
+    // tempo passa. A recorrência só termina quando o usuário cancelar.
+    //
+    // Falhar aqui não pode derrubar o lançamento: o gasto é o fato, a projeção
+    // é derivada dele.
     if (saved.isRecurring) {
-      await this.garantirContaPlanejada(saved, user);
+      try {
+        const userIds = await this.scopeUserIds(user);
+        await this.recurrenceService.sincronizarSerie(saved, userIds);
+      } catch (erro) {
+        this.logger.error(
+          `Não foi possível projetar a série da despesa ${saved.id}: ${
+            erro instanceof Error ? erro.message : erro
+          }`,
+        );
+      }
     }
 
     return saved;
+  }
+
+  /**
+   * Encerra (ou retoma) a recorrência de uma despesa.
+   *
+   * Cancelar não apaga a despesa — ela é um gasto que aconteceu. O que acaba é
+   * a projeção para a frente: as ocorrências futuras ainda não pagas saem do
+   * Planejado, e as já pagas ficam como histórico.
+   */
+  async setRecurrenceActive(
+    id: string,
+    user: User,
+    ativa: boolean,
+  ): Promise<Expense> {
+    const expense = await this.findOne(id, user);
+
+    this.assertPodeAlterar(expense, user);
+
+    if (!expense.isRecurring) {
+      throw new BadRequestException(
+        'Esta despesa não foi lançada como recorrente.',
+      );
+    }
+
+    if (ativa) {
+      const userIds = await this.scopeUserIds(user);
+      await this.recurrenceService.reativarSerie(expense, userIds);
+    } else {
+      await this.recurrenceService.cancelarSerie(expense);
+    }
+
+    return this.findOne(id, user);
   }
 
   /**
@@ -349,132 +396,6 @@ export class ExpensesService {
   }
 
   // ==================== helpers ====================
-
-  /**
-   * Cria no Planejado a próxima ocorrência de uma despesa recorrente.
-   *
-   * Três decisões que valem registrar:
-   *
-   * 1. A conta gerada é a PRÓXIMA ocorrência, não a atual. A despesa que acabou
-   *    de ser lançada já é o registro do gasto de agora; duplicá-la no Planejado
-   *    faria o fluxo de caixa contar a mesma saída duas vezes — exatamente a
-   *    duplicidade que se quer evitar.
-   * 2. A checagem de duplicidade olha descrição + valor + vencimento no escopo
-   *    da FAMÍLIA, não do usuário. Se a Giovanna já cadastrou o aluguel no
-   *    Planejado, o Bruno lançando a mesma despesa recorrente não pode criar uma
-   *    segunda.
-   * 3. Falhar aqui não pode derrubar o lançamento da despesa. O gasto é o fato;
-   *    o planejamento é derivado dele.
-   */
-  private async garantirContaPlanejada(
-    expense: Expense,
-    user: User,
-  ): Promise<void> {
-    try {
-      const proximoVencimento = this.proximaOcorrencia(
-        new Date(expense.date),
-        expense.frequency ?? 'monthly',
-      );
-
-      const userIds = await this.scopeUserIds(user);
-
-      const janelaInicio = new Date(proximoVencimento);
-      janelaInicio.setDate(janelaInicio.getDate() - 3);
-      const janelaFim = new Date(proximoVencimento);
-      janelaFim.setDate(janelaFim.getDate() + 3);
-
-      const jaExiste = await this.plannedAccountsRepository
-        .createQueryBuilder('planned')
-        .where('planned.userId IN (:...userIds)', { userIds })
-        .andWhere('LOWER(planned.description) = LOWER(:description)', {
-          description: expense.description,
-        })
-        .andWhere('planned.amount = :amount', { amount: expense.amount })
-        .andWhere('planned.dueDate BETWEEN :inicio AND :fim', {
-          inicio: janelaInicio,
-          fim: janelaFim,
-        })
-        .andWhere("planned.status <> 'cancelled'")
-        .getOne();
-
-      if (jaExiste) {
-        this.logger.log(
-          `Despesa recorrente ${expense.id}: conta planejada ${jaExiste.id} já cobre este vencimento`,
-        );
-        return;
-      }
-
-      const planejada = await this.plannedAccountsRepository.save(
-        this.plannedAccountsRepository.create({
-          userId: user.id,
-          description: expense.description,
-          category: expense.category,
-          amount: expense.amount,
-          dueDate: proximoVencimento,
-          responsible: expense.responsible,
-          accountId: expense.accountId,
-          creditCardId: expense.creditCardId,
-          isRecurring: true,
-          frequency: expense.frequency ?? 'monthly',
-          status: 'pending',
-          observation: 'Gerada automaticamente a partir de uma despesa recorrente',
-        }),
-      );
-
-      // O vínculo é o que permite marcar as duas como pagas de uma vez.
-      await this.expensesRepository.update(expense.id, {
-        plannedAccountId: planejada.id,
-      });
-
-      this.logger.log(
-        `Conta planejada ${planejada.id} criada a partir da despesa recorrente ${expense.id}`,
-      );
-    } catch (erro) {
-      this.logger.error(
-        `Não foi possível criar a conta planejada da despesa ${expense.id}: ${
-          erro instanceof Error ? erro.message : erro
-        }`,
-      );
-    }
-  }
-
-  /** Avança uma data conforme a frequência da recorrência. */
-  private proximaOcorrencia(
-    base: Date,
-    frequency: 'daily' | 'weekly' | 'monthly' | 'yearly',
-  ): Date {
-    const proxima = new Date(base);
-
-    switch (frequency) {
-      case 'daily':
-        proxima.setDate(proxima.getDate() + 1);
-        break;
-      case 'weekly':
-        proxima.setDate(proxima.getDate() + 7);
-        break;
-      case 'yearly':
-        proxima.setFullYear(proxima.getFullYear() + 1);
-        break;
-      case 'monthly':
-      default: {
-        // `setMonth` estoura para o mês seguinte quando o dia não existe no
-        // destino (31/01 + 1 mês vira 03/03). Fixar no dia 1 antes de avançar e
-        // depois limitar ao último dia do mês evita esse deslocamento.
-        const dia = proxima.getDate();
-        proxima.setDate(1);
-        proxima.setMonth(proxima.getMonth() + 1);
-        const ultimoDia = new Date(
-          proxima.getFullYear(),
-          proxima.getMonth() + 1,
-          0,
-        ).getDate();
-        proxima.setDate(Math.min(dia, ultimoDia));
-        break;
-      }
-    }
-
-    return proxima;
-  }
 
   /**
    * Ids dos usuários cujos lançamentos este usuário pode ler.
