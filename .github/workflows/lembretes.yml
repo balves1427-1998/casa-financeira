@@ -1,0 +1,132 @@
+name: Lembretes de vencimento
+
+# Dispara os avisos de conta a vencer nas duas janelas do dia.
+#
+# POR QUE ISSO EXISTE AQUI, E NÃO SÓ DENTRO DA API
+# ------------------------------------------------
+# A API tem um @Cron interno nos mesmos horários, mas no plano gratuito do
+# Render o serviço HIBERNA depois de ~15 minutos sem tráfego — e um agendador
+# que mora dentro do processo não dispara com o processo dormindo. Este
+# workflow é o despertador de fora: acorda a API e manda ela disparar.
+#
+# Usar o GitHub Actions em vez de um cron-job.org evita criar conta em mais um
+# serviço: o repositório já está aqui.
+#
+# DUAS RESSALVAS HONESTAS
+#  1. O agendamento do GitHub é "best effort": em horário de pico o disparo
+#     pode atrasar de 5 a 20 minutos. Para um lembrete de conta, tudo bem.
+#  2. O GitHub SUSPENDE workflows agendados após 60 dias sem nenhum commit no
+#     repositório. Se o projeto ficar dois meses parado, é preciso reativar em
+#     Actions → este workflow → "Enable workflow".
+
+on:
+  schedule:
+    # Os horários do GitHub são em UTC. Brasília é UTC-3 o ano todo
+    # (não há mais horário de verão desde 2019).
+    - cron: '0 13 * * *' # 10:00 em Brasília
+    - cron: '0 22 * * *' # 19:00 em Brasília
+  workflow_dispatch:
+    inputs:
+      window:
+        description: 'Janela a disparar manualmente'
+        type: choice
+        options: [morning, evening]
+        default: morning
+
+# Se um disparo ainda estiver rodando quando o próximo começar, o novo espera
+# em vez de concorrer com ele.
+concurrency:
+  group: lembretes-vencimento
+  cancel-in-progress: false
+
+jobs:
+  disparar:
+    name: Avisar quem tem conta vencendo
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      API: ${{ vars.API_URL || 'https://casa-financeira-api.onrender.com' }}
+      TOKEN: ${{ secrets.REMINDER_DISPATCH_TOKEN }}
+
+    steps:
+      - name: Descobrir qual janela é esta
+        id: janela
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            JANELA="${{ inputs.window }}"
+          elif [ "${{ github.event.schedule }}" = "0 13 * * *" ]; then
+            JANELA="morning"
+          else
+            JANELA="evening"
+          fi
+          echo "window=$JANELA" >> "$GITHUB_OUTPUT"
+          echo "Janela: $JANELA"
+
+      - name: Conferir que o token está cadastrado
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Falta o secret REMINDER_DISPATCH_TOKEN."
+            echo "Cadastre em Settings → Secrets and variables → Actions → New repository secret."
+            echo "O valor está no Render, em Environment → REMINDER_DISPATCH_TOKEN."
+            exit 1
+          fi
+
+      - name: Acordar a API
+        # O primeiro acesso depois da hibernação leva de 30s a 1min. Sem esta
+        # espera o disparo bateria num serviço dormindo e o lembrete não sairia.
+        run: |
+          for tentativa in $(seq 1 12); do
+            CODIGO=$(curl -s -o /dev/null -w '%{http_code}' -m 40 "$API/health" || echo 000)
+            if [ "$CODIGO" = "200" ]; then
+              echo "API no ar (tentativa $tentativa)."
+              exit 0
+            fi
+            echo "Ainda acordando (tentativa $tentativa, HTTP $CODIGO)..."
+            sleep 10
+          done
+          echo "::error::A API não respondeu em /health depois de ~2 minutos."
+          exit 1
+
+      - name: Disparar os lembretes
+        run: |
+          JANELA="${{ steps.janela.outputs.window }}"
+          RESPOSTA=$(mktemp)
+          CODIGO=$(curl -s -o "$RESPOSTA" -w '%{http_code}' -m 120 \
+            -X POST "$API/reminders/dispatch" \
+            -H 'Content-Type: application/json' \
+            -H "x-reminder-token: $TOKEN" \
+            -d "{\"window\":\"$JANELA\"}")
+
+          echo "HTTP $CODIGO"
+          cat "$RESPOSTA"
+          echo
+
+          if [ "$CODIGO" = "403" ]; then
+            echo "::error::Token recusado. O secret REMINDER_DISPATCH_TOKEN não confere com o valor no Render."
+            exit 1
+          fi
+          if [ "$CODIGO" != "200" ] && [ "$CODIGO" != "201" ]; then
+            echo "::error::O disparo falhou (HTTP $CODIGO)."
+            exit 1
+          fi
+
+          # Um disparo pode responder 200 e mesmo assim não ter enviado nada,
+          # porque o SMTP não está configurado. Isso precisa aparecer.
+          if grep -q '"smtpConfigurado":false' "$RESPOSTA"; then
+            echo "::error::SMTP não configurado no Render — nenhum e-mail foi entregue."
+            echo "Defina SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD e EMAIL_FROM."
+            exit 1
+          fi
+
+          python3 - "$RESPOSTA" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          print(
+              f"::notice::Janela {d.get('janela')} — "
+              f"{d.get('contasAvaliadas', 0)} conta(s) avaliada(s), "
+              f"{d.get('lembretesEnviados', 0)} aviso(s) enviado(s), "
+              f"{d.get('jaEnviados', 0)} já avisado(s), "
+              f"{d.get('falhas', 0)} falha(s)."
+          )
+          PY

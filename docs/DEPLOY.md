@@ -161,9 +161,40 @@ cron dentro de um processo dormindo simplesmente não dispara. Sem o passo
 abaixo, os lembretes só sairiam por coincidência — quando alguém estivesse
 usando o sistema no exato horário.
 
-O blueprint gera a variável `REMINDER_DISPATCH_TOKEN` automaticamente. Copie o
-valor em *Environment* e cadastre **duas tarefas** num agendador gratuito
-(cron-job.org, EasyCron, GitHub Actions):
+O blueprint gera a variável `REMINDER_DISPATCH_TOKEN` automaticamente.
+
+#### Caminho recomendado: GitHub Actions (já vem pronto)
+
+O repositório já traz `.github/workflows/lembretes.yml`, que faz exatamente
+isso nos dois horários — não é preciso criar conta em nenhum serviço de
+agendamento. Falta **um único passo**:
+
+1. No Render → *Environment*, copie o valor de `REMINDER_DISPATCH_TOKEN`.
+2. No GitHub → *Settings* → *Secrets and variables* → *Actions* →
+   *New repository secret*:
+   - **Name:** `REMINDER_DISPATCH_TOKEN`
+   - **Secret:** o valor copiado
+
+Para testar sem esperar o horário: *Actions* → **Lembretes de vencimento** →
+*Run workflow* → escolha a janela.
+
+O workflow acorda a API antes de disparar (o primeiro acesso depois da
+hibernação leva de 30s a 1min) e **falha com erro visível** se o token estiver
+errado ou se o SMTP não estiver configurado — em vez de responder 200 e não ter
+entregue nada.
+
+Duas ressalvas do GitHub, ditas de frente: o agendamento é *best effort* e pode
+atrasar de 5 a 20 minutos em horário de pico; e workflows agendados são
+**suspensos após 60 dias sem nenhum commit** no repositório (reativa-se em
+*Actions* → o workflow → *Enable workflow*).
+
+Se a API não estiver em `casa-financeira-api.onrender.com`, defina a variável
+de repositório `API_URL` (*Settings* → *Secrets and variables* → *Actions* →
+aba *Variables*).
+
+#### Alternativa: qualquer agendador HTTP
+
+Se preferir cron-job.org, EasyCron ou similar, cadastre duas tarefas:
 
 | Horário (Brasília) | Método | URL | Corpo |
 |---|---|---|---|
