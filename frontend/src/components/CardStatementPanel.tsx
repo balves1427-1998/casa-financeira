@@ -94,23 +94,43 @@ export function CardStatementPanel({ cardId }: { cardId: string }) {
   const [importando, setImportando] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
+  /**
+   * Carrega os três blocos de forma INDEPENDENTE.
+   *
+   * Antes isto era um `Promise.all`, e o efeito colateral era grave: uma falha
+   * em QUALQUER uma das três chamadas — inclusive a de "melhor dia", que é a
+   * menos essencial das três — derrubava o painel inteiro, e junto com ele
+   * sumia a importação de fatura em PDF. O usuário não via um erro no lugar do
+   * botão; via a funcionalidade simplesmente não existir.
+   *
+   * Foi exatamente o que aconteceu em produção enquanto a coluna
+   * `planned_accounts.type` estava faltando: "melhor dia" consulta o fluxo de
+   * caixa, o fluxo de caixa quebrava, e a importação de PDF desaparecia da tela
+   * por tabela.
+   */
   const carregar = useCallback(async () => {
     setIsLoading(true);
     setErro(null);
-    try {
-      const [s, h, m] = await Promise.all([
-        apiClient.getCardStatement(cardId),
-        apiClient.getCardHistory(cardId, 12),
-        apiClient.getCardBestDay(cardId),
-      ]);
-      setStatement(s);
-      setHistorico(Array.isArray(h) ? h : []);
-      setMelhorDia(m);
-    } catch (err) {
-      setErro(getApiErrorMessage(err, 'Não foi possível carregar a fatura.'));
-    } finally {
-      setIsLoading(false);
+
+    const [s, h, m] = await Promise.allSettled([
+      apiClient.getCardStatement(cardId),
+      apiClient.getCardHistory(cardId, 12),
+      apiClient.getCardBestDay(cardId),
+    ]);
+
+    if (s.status === 'fulfilled') {
+      setStatement(s.value);
+    } else {
+      setStatement(null);
+      setErro(getApiErrorMessage(s.reason, 'Não foi possível carregar a fatura.'));
     }
+
+    // Histórico e melhor dia são complementares: quando falham, o bloco some,
+    // mas nada mais é afetado.
+    setHistorico(h.status === 'fulfilled' && Array.isArray(h.value) ? h.value : []);
+    setMelhorDia(m.status === 'fulfilled' ? m.value : null);
+
+    setIsLoading(false);
   }, [cardId]);
 
   useEffect(() => {
@@ -201,14 +221,6 @@ export function CardStatementPanel({ cardId }: { cardId: string }) {
     );
   }
 
-  if (erro && !statement) {
-    return (
-      <p className="mt-4 text-sm text-red-700 dark:text-red-300">{erro}</p>
-    );
-  }
-
-  if (!statement) return null;
-
   const gastoNoGrafico = historico.map(mes => ({
     mes: rotuloCompetencia(mes.competencia),
     total: mes.total,
@@ -225,7 +237,10 @@ export function CardStatementPanel({ cardId }: { cardId: string }) {
         <p className="text-sm text-green-700 dark:text-green-300">{feedback}</p>
       )}
 
-      {/* Fatura e limite */}
+      {/* Fatura e limite — só quando a fatura carregou. A importação de PDF
+          abaixo NÃO depende disto: é justamente ela que popula o cartão. */}
+      {statement && (
+      <>
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-lg bg-gray-50 dark:bg-gray-800/50 p-3">
           <p className="text-xs text-gray-600 dark:text-gray-400">Fatura atual</p>
@@ -353,7 +368,13 @@ export function CardStatementPanel({ cardId }: { cardId: string }) {
         </div>
       )}
 
-      {/* Importar fatura em PDF */}
+      </>
+      )}
+
+      {/* Importar fatura em PDF — SEMPRE visível.
+          É por aqui que os lançamentos entram no cartão; se ela dependesse da
+          fatura ter carregado, um cartão recém-cadastrado (ou uma falha
+          qualquer no backend) deixaria o usuário sem caminho nenhum. */}
       <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 p-3">
         <p className="text-sm font-medium text-gray-900 dark:text-white mb-1">
           Importar fatura em PDF

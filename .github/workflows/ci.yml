@@ -74,7 +74,7 @@ jobs:
         run: npm run build
 
   frontend:
-    name: Frontend — tipos e build
+    name: Frontend — tipos, testes e build
     runs-on: ubuntu-latest
 
     defaults:
@@ -95,6 +95,11 @@ jobs:
 
       - name: Verificar tipos
         run: npx tsc --noEmit
+
+      # Tipos e build não pegam UI que some: a importação de PDF desapareceu
+      # da tela por meses sem quebrar nenhum dos dois.
+      - name: Testes de componente
+        run: npm test
 
       - name: Build
         run: npm run build
