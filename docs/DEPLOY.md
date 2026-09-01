@@ -134,11 +134,47 @@ continuam até a conta ser marcada como paga.
 
 ### 1. Configurar o e-mail
 
-Sem SMTP, os avisos continuam aparecendo **dentro da aplicação**, mas nenhum
-e-mail é entregue. O sistema nunca finge ter enviado: o registro fica marcado
-como falha, com o motivo.
+Sem envio configurado, os avisos continuam aparecendo **dentro da aplicação**,
+mas nenhum e-mail é entregue. O sistema nunca finge ter enviado: o registro fica
+marcado como falha, com o motivo.
 
-No Render → *Environment*:
+> ### ⛔ SMTP não funciona no plano gratuito do Render
+>
+> Desde 26/09/2025 o Render **bloqueia tráfego de saída nas portas 25, 465 e
+> 587** em serviços gratuitos. Não é erro de senha nem de configuração: a
+> conexão simplesmente nunca se estabelece, e o nodemailer fica pendurado até
+> estourar em `Connection timeout`.
+>
+> Foi assim que o primeiro envio real deste sistema falhou. A solução é enviar
+> por **API HTTP** (porta 443, que passa) — ou migrar para um plano pago, onde o
+> bloqueio não vale.
+
+#### Caminho recomendado: API do Brevo (gratuito)
+
+O plano gratuito do Brevo cobre 300 e-mails/dia — muito acima do que dois
+lembretes diários consomem — e aceita **verificar um endereço comum (Gmail) como
+remetente**, sem exigir domínio próprio.
+
+1. Crie a conta em brevo.com.
+2. Verifique o remetente: *Senders, Domains & Dedicated IPs* → *Senders* → *Add
+   a sender*. O Brevo manda um e-mail de confirmação para esse endereço.
+3. Gere a chave: *SMTP & API* → *API keys* → *Generate a new API key*.
+4. No Render → *Environment*:
+
+```
+BREVO_API_KEY = <a chave gerada>
+EMAIL_FROM    = Controle Financeiro da Casa <remetente@verificado>
+```
+
+O `EMAIL_FROM` aceita as duas formas — `email@dominio` ou `Nome <email@dominio>`
+— mas o endereço **precisa ser o que foi verificado**, senão a API recusa com
+erro explícito (que fica registrado no histórico de e-mails).
+
+`BREVO_API_KEY` tem **precedência sobre o SMTP**: com as duas configuradas, o
+sistema usa a API. Isso é intencional — onde ele roda, o SMTP não funciona, e
+tentar o canal quebrado só produziria espera e falha.
+
+#### SMTP (desenvolvimento local, ou plano pago)
 
 ```
 SMTP_HOST     = smtp.gmail.com

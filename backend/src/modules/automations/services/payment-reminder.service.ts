@@ -404,6 +404,7 @@ export class PaymentReminderService {
    */
   async getStatus(): Promise<{
     smtpConfigurado: boolean;
+    canalDeEnvio: 'api' | 'smtp' | null;
     disparoExternoConfigurado: boolean;
     janelas: string[];
     ultimosEnvios: Array<{
@@ -423,6 +424,7 @@ export class PaymentReminderService {
 
     return {
       smtpConfigurado: this.emailService.smtpConfigurado,
+      canalDeEnvio: this.emailService.canalDeEnvio,
       disparoExternoConfigurado: Boolean(process.env.REMINDER_DISPATCH_TOKEN),
       janelas: ['10:00 (America/Sao_Paulo)', '19:00 (America/Sao_Paulo)'],
       ultimosEnvios: ultimos.map((r) => ({

@@ -45,15 +45,53 @@ export class EmailService {
   }
 
   /**
+   * Qual canal de envio está configurado.
+   *
+   * `api` tem precedência sobre `smtp` porque é o único que funciona onde o
+   * sistema roda: o plano gratuito do Render BLOQUEIA tráfego de saída nas
+   * portas 25, 465 e 587, então qualquer tentativa por SMTP morre em
+   * "Connection timeout" depois de dois minutos pendurada. A API do Brevo fala
+   * HTTPS na 443, que passa.
+   *
+   * O caminho SMTP continua aqui de propósito: é o que se usa em
+   * desenvolvimento (contra um servidor local) e é o que volta a valer se o
+   * serviço um dia migrar para um plano pago.
+   */
+  get canalDeEnvio(): 'api' | 'smtp' | null {
+    if (process.env.BREVO_API_KEY) return 'api';
+    if (
+      process.env.SMTP_HOST &&
+      process.env.SMTP_USER &&
+      process.env.SMTP_PASSWORD
+    ) {
+      return 'smtp';
+    }
+    return null;
+  }
+
+  /**
    * Diz se o envio de e-mail está configurado.
    *
    * Usado pelo motor de lembretes para avisar no log — e pelo endpoint de
-   * diagnóstico — em vez de acumular falhas silenciosas.
+   * diagnóstico — em vez de acumular falhas silenciosas. O nome ficou de
+   * quando SMTP era o único caminho; hoje significa "há como entregar".
    */
   get smtpConfigurado(): boolean {
-    return Boolean(
-      process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD,
-    );
+    return this.canalDeEnvio !== null;
+  }
+
+  /** Remetente declarado nas variáveis de ambiente. */
+  private get remetente(): { email: string; nome: string } {
+    const bruto =
+      process.env.EMAIL_FROM ||
+      process.env.SMTP_USER ||
+      'nao-responda@casa-financeira';
+
+    // Aceita tanto "fulano@x.com" quanto "Nome <fulano@x.com>".
+    const comNome = bruto.match(/^\s*(.*?)\s*<\s*([^>]+)\s*>\s*$/);
+    return comNome
+      ? { nome: comNome[1] || 'Controle Financeiro da Casa', email: comNome[2] }
+      : { nome: 'Controle Financeiro da Casa', email: bruto };
   }
 
   /**
@@ -63,7 +101,7 @@ export class EmailService {
    * de parâmetro de requisição. Senha de e-mail não trafega pela API.
    */
   private getTransporter(): nodemailer.Transporter | null {
-    if (!this.smtpConfigurado) {
+    if (this.canalDeEnvio !== 'smtp') {
       return null;
     }
 
@@ -82,9 +120,68 @@ export class EmailService {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASSWORD,
       },
+      // Sem estes limites o nodemailer fica pendurado ~2 minutos quando a
+      // porta está bloqueada — tempo suficiente para o disparo inteiro estourar
+      // o timeout de quem o chamou, sem nunca dizer o que houve.
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 20_000,
     });
 
     return this.transporter;
+  }
+
+  /**
+   * Entrega via API HTTP do Brevo.
+   *
+   * Devolve o messageId. Erros sobem com o corpo da resposta junto: uma chave
+   * inválida ou um remetente não verificado precisam aparecer no histórico com
+   * o motivo, senão o usuário fica sem saber por que nada chegou.
+   */
+  private async enviarPelaApi(emailLog: EmailLog): Promise<string> {
+    const de = this.remetente;
+    const limite = Number(process.env.EMAIL_HTTP_TIMEOUT_MS) || 20_000;
+    const controlador = new AbortController();
+    const expira = setTimeout(() => controlador.abort(), limite);
+
+    try {
+      const resposta = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': process.env.BREVO_API_KEY as string,
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: de.nome, email: de.email },
+          to: [{ email: emailLog.recipient }],
+          subject: emailLog.subject,
+          htmlContent: emailLog.htmlContent,
+        }),
+        signal: controlador.signal,
+      });
+
+      const corpo = await resposta.text();
+
+      if (!resposta.ok) {
+        throw new Error(
+          `Brevo respondeu ${resposta.status}: ${corpo.slice(0, 300)}`,
+        );
+      }
+
+      try {
+        return (JSON.parse(corpo).messageId as string) || 'brevo';
+      } catch {
+        return 'brevo';
+      }
+    } catch (erro) {
+      if (erro instanceof Error && erro.name === 'AbortError') {
+        throw new Error(`Brevo não respondeu em ${limite / 1000}s.`);
+      }
+      throw erro;
+    } finally {
+      clearTimeout(expira);
+    }
   }
 
   /**
@@ -341,13 +438,14 @@ export class EmailService {
    * por que um lembrete não chegou.
    */
   private async entregar(emailLog: EmailLog): Promise<void> {
-    const transporter = this.getTransporter();
+    const canal = this.canalDeEnvio;
 
-    if (!transporter) {
+    if (canal === null) {
       emailLog.status = EmailStatus.FAILED;
       emailLog.errorMessage =
-        'SMTP não configurado. Defina SMTP_HOST, SMTP_PORT, SMTP_USER, ' +
-        'SMTP_PASSWORD e EMAIL_FROM nas variáveis de ambiente do servidor.';
+        'Nenhum canal de envio configurado. Defina BREVO_API_KEY e EMAIL_FROM ' +
+        '(recomendado) ou SMTP_HOST, SMTP_PORT, SMTP_USER e SMTP_PASSWORD nas ' +
+        'variáveis de ambiente do servidor.';
 
       await this.emailLogRepository.save(emailLog);
 
@@ -356,7 +454,7 @@ export class EmailService {
       if (!this.transporterVerificado) {
         this.transporterVerificado = true;
         this.logger.warn(
-          'SMTP não configurado: nenhum e-mail será entregue. Os lembretes ' +
+          'Envio de e-mail não configurado: nada será entregue. Os lembretes ' +
             'continuam sendo registrados e aparecem como alerta na aplicação.',
         );
       }
@@ -365,19 +463,24 @@ export class EmailService {
     }
 
     try {
-      const resultado = await transporter.sendMail({
-        from:
-          process.env.EMAIL_FROM ||
-          process.env.SMTP_USER ||
-          'nao-responda@casa-financeira',
-        to: emailLog.recipient,
-        subject: emailLog.subject,
-        html: emailLog.htmlContent,
-      });
+      let messageId: string;
+
+      if (canal === 'api') {
+        messageId = await this.enviarPelaApi(emailLog);
+      } else {
+        const de = this.remetente;
+        const resultado = await this.getTransporter()!.sendMail({
+          from: `"${de.nome}" <${de.email}>`,
+          to: emailLog.recipient,
+          subject: emailLog.subject,
+          html: emailLog.htmlContent,
+        });
+        messageId = resultado.messageId;
+      }
 
       emailLog.status = EmailStatus.SENT;
       emailLog.sentAt = new Date();
-      emailLog.messageId = resultado.messageId;
+      emailLog.messageId = messageId;
 
       await this.emailLogRepository.save(emailLog);
 

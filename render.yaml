@@ -63,15 +63,29 @@ services:
       - key: FRONTEND_URL
         sync: false
 
-      # SMTP — necessário para os LEMBRETES DE VENCIMENTO chegarem por e-mail.
+      # ENVIO DE E-MAIL — necessário para os LEMBRETES DE VENCIMENTO chegarem.
       #
-      # Sem estas variáveis o sistema continua funcionando e os avisos aparecem
-      # dentro da aplicação, mas nenhum e-mail é entregue. O registro fica
-      # marcado como falha com o motivo — nunca como "enviado".
+      # Sem envio configurado o sistema continua funcionando e os avisos
+      # aparecem dentro da aplicação, mas nenhum e-mail é entregue. O registro
+      # fica marcado como falha com o motivo — nunca como "enviado".
       #
-      # Para o Gmail, use uma SENHA DE APLICATIVO (myaccount.google.com →
-      # Segurança → Senhas de app), nunca a senha da conta:
-      #   SMTP_HOST=smtp.gmail.com  SMTP_PORT=587
+      # >>> NÃO USE SMTP NO PLANO GRATUITO. <<<
+      # Desde 26/09/2025 o Render BLOQUEIA tráfego de saída nas portas 25, 465
+      # e 587 em serviços gratuitos. Qualquer tentativa por SMTP morre em
+      # "Connection timeout" — foi assim que o primeiro envio real falhou.
+      #
+      # O caminho que funciona é uma API HTTP (porta 443). BREVO_API_KEY tem
+      # precedência sobre o SMTP quando as duas estiverem definidas:
+      #   BREVO_API_KEY = chave criada em app.brevo.com (SMTP & API → API keys)
+      #   EMAIL_FROM    = Controle Financeiro da Casa <remetente@verificado>
+      # O remetente precisa estar VERIFICADO no Brevo, senão a API recusa.
+      - key: BREVO_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+
+      # SMTP: só para desenvolvimento local ou se o serviço migrar para um
+      # plano pago, onde as portas deixam de ser bloqueadas.
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
@@ -79,8 +93,6 @@ services:
       - key: SMTP_USER
         sync: false
       - key: SMTP_PASSWORD
-        sync: false
-      - key: EMAIL_FROM
         sync: false
 
       # Segredo do disparo externo dos lembretes.
