@@ -45,10 +45,12 @@ interface MesHistorico {
 interface MelhorDia {
   bestDate: string;
   recommendation: string;
+  closingNotice: string;
   shouldWait: boolean;
   daysUntilClosing: number;
   daysToPayIfBuyToday: number;
   daysToPayIfWait: number;
+  extraDaysIfWait: number;
 }
 
 interface LancamentoLido {
@@ -297,21 +299,47 @@ export function CardStatementPanel({ cardId }: { cardId: string }) {
         </p>
       </div>
 
-      {/* Melhor dia para comprar */}
+      {/* Fechamento e melhor dia para comprar */}
       {melhorDia && (
-        <div
-          className={`rounded-lg p-3 text-sm ${
-            melhorDia.shouldWait
-              ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-900 dark:text-amber-200'
-              : 'bg-green-50 dark:bg-green-950/20 text-green-900 dark:text-green-200'
-          }`}
-        >
-          <p className="font-medium mb-0.5">
-            {melhorDia.shouldWait
-              ? '⏳ Vale esperar para comprar'
-              : '🟢 Pode comprar hoje'}
-          </p>
-          <p className="text-xs">{melhorDia.recommendation}</p>
+        <div className="space-y-2">
+          {/* O prazo até fechar vem primeiro: é o dado que decide a compra. */}
+          <div className="rounded-lg bg-gray-100 dark:bg-gray-800 p-3">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-sm font-medium text-gray-900 dark:text-white">
+                📅 {melhorDia.closingNotice}
+              </p>
+              {melhorDia.daysUntilClosing > 0 && (
+                <span className="shrink-0 text-2xl font-bold tabular-nums text-gray-900 dark:text-white">
+                  {melhorDia.daysUntilClosing}
+                  <span className="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+                    {melhorDia.daysUntilClosing === 1 ? 'dia' : 'dias'}
+                  </span>
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div
+            className={`rounded-lg p-3 text-sm ${
+              melhorDia.shouldWait
+                ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-900 dark:text-amber-200'
+                : 'bg-green-50 dark:bg-green-950/20 text-green-900 dark:text-green-200'
+            }`}
+          >
+            <p className="font-medium mb-0.5">
+              {melhorDia.shouldWait
+                ? `⏳ Melhor comprar a partir de ${formatDateBR(melhorDia.bestDate)}`
+                : '🟢 Hoje é o melhor dia para comprar'}
+            </p>
+            <p className="text-xs">{melhorDia.recommendation}</p>
+
+            {melhorDia.shouldWait && melhorDia.extraDaysIfWait > 0 && (
+              <p className="mt-1.5 text-xs opacity-80">
+                Prazo comprando hoje: {melhorDia.daysToPayIfBuyToday} dia(s) ·
+                esperando: {melhorDia.daysToPayIfWait} dia(s).
+              </p>
+            )}
+          </div>
         </div>
       )}
 

@@ -21,7 +21,45 @@ interface ExtractedTransaction {
   type: 'debit' | 'credit';
   transactionId?: string;
   confidence: number;
+  /** Preenchidos quando a linha traz "Parcela 2/3". */
+  installmentCurrent?: number;
+  installmentTotal?: number;
 }
+
+/** Mês por extenso abreviado, como as faturas brasileiras escrevem. */
+const MESES: Record<string, number> = {
+  jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6,
+  jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12,
+};
+
+/**
+ * Linhas que TÊM data e valor mas não são lançamentos.
+ *
+ * Sem isto, o resumo da fatura entra como se fosse compra: a linha
+ * "Total de compras de todos os cartões, 07 JUL a 07 AGO   R$ 2.996,09"
+ * viraria uma despesa de R$ 2.996,09 — somada a cada uma das compras que ela
+ * resume. O erro dobraria a fatura inteira.
+ */
+const LINHAS_DE_RESUMO: RegExp[] = [
+  /total de compras/i,
+  /total a pagar/i,
+  /pagamento recebido/i,
+  /pagamento m[íi]nimo/i,
+  /\bpagamento em\b/i,
+  /saldo restante da fatura/i,
+  /saldo em aberto/i,
+  /fatura anterior/i,
+  /fechamento da pr[óo]xima fatura/i,
+  /per[íi]odo vigente/i,
+  /^transa[çc][õo]es\b/i,
+  /^limite\b/i,
+  /valor m[áa]ximo/i,
+  /data de vencimento/i,
+  /^fatura\b/i,
+  /juros totais/i,
+  /valor da parcela/i,
+  /valor de entrada/i,
+];
 
 @Injectable()
 export class PdfParserService {
@@ -224,13 +262,30 @@ export class PdfParserService {
    */
   private extractTransactions(content: string): ExtractedTransaction[] {
     const transactions: ExtractedTransaction[] = [];
+    const referencia = this.detectarCompetencia(content);
+    const linhas = content.split('\n').map((l) => l.trim());
     let sequence = 0;
 
-    for (const rawLine of content.split('\n')) {
-      const line = rawLine.trim();
+    for (let i = 0; i < linhas.length; i++) {
+      const line = linhas[i];
       if (!line) continue;
+      if (LINHAS_DE_RESUMO.some((padrao) => padrao.test(line))) continue;
 
-      const transaction = this.parseTransactionLine(line, sequence + 1);
+      // Compra com detalhamento (câmbio, IOF, juros) não cabe numa linha só: a
+      // fatura quebra o bloco e joga o VALOR algumas linhas abaixo, sozinho.
+      // Sem juntar os dois, a compra internacional de R$ 112,76 e o Pix
+      // parcelado de R$ 1.099,96 desta fatura seriam perdidos em silêncio.
+      const alvo = this.temValor(line)
+        ? line
+        : this.juntarComValorAdiante(linhas, i, referencia);
+
+      if (!alvo) continue;
+
+      const transaction = this.parseTransactionLine(
+        alvo,
+        sequence + 1,
+        referencia,
+      );
       if (transaction) {
         sequence++;
         transactions.push(transaction);
@@ -240,53 +295,188 @@ export class PdfParserService {
     return transactions;
   }
 
+  /** A linha traz algum valor monetário? */
+  private temValor(line: string): boolean {
+    return /R\$\s*-?\d|\d{1,3}(?:\.\d{3})*,\d{2}/.test(line);
+  }
+
+  /**
+   * Para uma linha com data mas sem valor, procura o valor solto logo abaixo.
+   *
+   * Só aceita uma linha que seja EXCLUSIVAMENTE um valor — as linhas de
+   * detalhe no meio ("Total a pagar: R$ 16,40 (valor da transação de
+   * R$ 15,00 + ...)") citam vários números e pegar qualquer um deles daria a
+   * quantia errada. E para na próxima linha com data, para nunca roubar o
+   * valor do lançamento seguinte.
+   */
+  private juntarComValorAdiante(
+    linhas: string[],
+    inicio: number,
+    referencia: { mes: number; ano: number } | null,
+  ): string | null {
+    if (!this.resolverData(linhas[inicio].replace(/[−‒–—]/g, '-'), referencia)) {
+      return null;
+    }
+
+    const limite = Math.min(inicio + 5, linhas.length);
+    for (let j = inicio + 1; j < limite; j++) {
+      const candidata = linhas[j];
+      if (!candidata) continue;
+
+      if (this.resolverData(candidata.replace(/[−‒–—]/g, '-'), referencia)) {
+        return null;
+      }
+
+      if (/^-?\s*R\$\s*-?\d{1,3}(?:\.\d{3})*,\d{2}$/.test(candidata)) {
+        return `${linhas[inicio]} ${candidata}`;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Descobre a que ano/mês a fatura se refere.
+   *
+   * Faturas de cartão escrevem o dia dos lançamentos SEM ano — "07 JUL", não
+   * "07/07/2026". O ano só aparece no cabeçalho ("FATURA 14 AGO 2026"). Sem
+   * essa âncora não há como datar nenhuma compra, que era exatamente o motivo
+   * de uma fatura real do Nubank ser lida com ZERO lançamentos.
+   *
+   * Usa a PRIMEIRA data completa do documento: nas faturas ela é o vencimento,
+   * no cabeçalho. As datas que aparecem depois costumam ser do ciclo seguinte
+   * ("Fechamento da próxima fatura 07 SET 2026") e apontariam para o mês errado.
+   */
+  private detectarCompetencia(
+    content: string,
+  ): { mes: number; ano: number } | null {
+    const completa = content.match(
+      /\b(\d{1,2})\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\w*\s+(20\d{2})\b/i,
+    );
+
+    if (completa) {
+      return { mes: MESES[completa[2].toLowerCase()], ano: Number(completa[3]) };
+    }
+
+    const numerica = content.match(/\b\d{1,2}\/(\d{1,2})\/(20\d{2})\b/);
+    if (numerica) {
+      return { mes: Number(numerica[1]), ano: Number(numerica[2]) };
+    }
+
+    const soAno = content.match(/\b(20\d{2})\b/);
+    return soAno ? { mes: 12, ano: Number(soAno[1]) } : null;
+  }
+
+  /**
+   * Resolve a data de uma linha, com ou sem ano explícito.
+   */
+  private resolverData(
+    line: string,
+    referencia: { mes: number; ano: number } | null,
+  ): { date: string; fim: number } | null {
+    // 1. Data numérica completa: 05/08/2026 ou 05-08-26.
+    const numerica = line.match(/(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/);
+    if (numerica) {
+      const [, dia, mes, anoBruto] = numerica;
+      const ano =
+        anoBruto.length === 2 ? `20${anoBruto}` : anoBruto.padStart(4, '0');
+      return {
+        date: `${ano}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}`,
+        fim: (numerica.index ?? 0) + numerica[0].length,
+      };
+    }
+
+    // 2. Mês por extenso: "07 JUL" ou "14 AGO 2026".
+    const extenso = line.match(
+      /\b(\d{1,2})\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\w*\b(?:\s+(20\d{2}))?/i,
+    );
+    if (extenso) {
+      const dia = Number(extenso[1]);
+      const mes = MESES[extenso[2].toLowerCase()];
+      let ano = extenso[3] ? Number(extenso[3]) : referencia?.ano;
+
+      if (ano === undefined) return null;
+
+      // Ciclo que atravessa o réveillon: numa fatura de JANEIRO, um lançamento
+      // de DEZEMBRO é do ano anterior. Sem isto a compra vai parar 12 meses no
+      // futuro e some de qualquer relatório.
+      if (!extenso[3] && referencia && mes > referencia.mes) {
+        ano -= 1;
+      }
+
+      if (dia < 1 || dia > 31) return null;
+
+      return {
+        date: `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`,
+        fim: (extenso.index ?? 0) + extenso[0].length,
+      };
+    }
+
+    return null;
+  }
+
   /**
    * Parse individual transaction line
    */
   private parseTransactionLine(
     line: string,
     sequence: number,
+    referencia: { mes: number; ano: number } | null = null,
   ): ExtractedTransaction | null {
-    const dateMatch = line.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
-    if (!dateMatch) return null;
+    // Faturas usam o sinal de menos tipográfico (U+2212) em estornos:
+    // "−R$ 3,95". Sem normalizar, o estorno entra como despesa.
+    const normalizada = line.replace(/[−‒–—]/g, '-');
 
-    const [, day, month, rawYear] = dateMatch;
-    const year = rawYear.length === 2 ? `20${rawYear}` : rawYear.padStart(4, '0');
-    const date = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    const data = this.resolverData(normalizada, referencia);
+    if (!data) return null;
 
     // O valor fica no fim da linha. Buscar a PRIMEIRA ocorrência numérica
     // (comportamento anterior) capturava o próprio dia da data — "05/08/2026"
     // virava R$ 5,00. Aqui a última ocorrência monetária é a escolhida.
+    // O sinal pode vir ANTES do "R$", por isso ele é capturado à parte.
     const amountPattern =
-      /R\$\s*(-?\d{1,3}(?:\.\d{3})*,\d{2}|-?\d+(?:[.,]\d{1,2})?)|(-?\d{1,3}(?:\.\d{3})*,\d{2})/g;
+      /(-)?\s*R\$\s*(-?\d{1,3}(?:\.\d{3})*,\d{2}|-?\d+(?:[.,]\d{1,2})?)|(-?\d{1,3}(?:\.\d{3})*,\d{2})/g;
 
-    const matches = [...line.matchAll(amountPattern)];
+    const matches = [...normalizada.matchAll(amountPattern)];
     if (matches.length === 0) return null;
 
     const chosen = matches[matches.length - 1];
-    const amountStr = (chosen[1] ?? chosen[2] ?? '').trim();
-    const amount = this.parseAmount(amountStr);
+    const amountStr = (chosen[2] ?? chosen[3] ?? '').trim();
+    const parsed = this.parseAmount(amountStr);
 
-    if (amount === null || Number.isNaN(amount)) return null;
+    if (parsed === null || Number.isNaN(parsed)) return null;
+
+    const amount = chosen[1] === '-' ? -Math.abs(parsed) : parsed;
+
+    // Lançamento de R$ 0,00 não é lançamento: as faturas usam essa linha para
+    // dizer que não sobrou saldo do ciclo anterior.
+    if (amount === 0) return null;
 
     // Descrição = o que está entre o fim da data e o início do valor.
-    const descriptionStart = (dateMatch.index ?? 0) + dateMatch[0].length;
-    const descriptionEnd = chosen.index ?? line.length;
-    const description = line
-      .slice(descriptionStart, descriptionEnd)
+    const descriptionEnd = chosen.index ?? normalizada.length;
+    const description = normalizada
+      .slice(data.fim, descriptionEnd)
+      // Máscara do cartão usado ("•••• 8424") não é parte do estabelecimento.
+      .replace(/[•●*·]{2,}\s*\d{4}/g, '')
       .replace(/\s+/g, ' ')
       .trim();
 
     if (!description) return null;
 
+    const parcela = description.match(/parcela\s+(\d+)\s*\/\s*(\d+)/i);
+
     return {
-      date,
+      date: data.date,
       description: description.substring(0, 255),
       establishment: this.extractEstablishment(description),
       amount: Math.abs(amount),
-      type: this.determineTransactionType(line, amount),
+      type: this.determineTransactionType(normalizada, amount),
       transactionId: `extracted_${sequence}`,
       confidence: 0.7,
+      ...(parcela && {
+        installmentCurrent: Number(parcela[1]),
+        installmentTotal: Number(parcela[2]),
+      }),
     };
   }
 
@@ -333,6 +523,10 @@ export class PdfParserService {
     line: string,
     amount: number,
   ): 'debit' | 'credit' {
+    // O sinal é a evidência mais forte que existe e vem do próprio documento:
+    // numa fatura, valor negativo é estorno ou devolução, nunca compra.
+    if (amount < 0) return 'credit';
+
     const normalized = this.removeAccents(line).toLowerCase();
 
     const creditKeywords = [

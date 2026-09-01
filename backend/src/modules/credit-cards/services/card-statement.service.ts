@@ -272,7 +272,8 @@ export class CardStatementService {
 
     const ciclo = this.calcularCiclo(card, referencia);
 
-    // O dia seguinte ao fechamento abre o ciclo mais longo.
+    // O dia seguinte ao fechamento abre o ciclo mais longo: a compra cai na
+    // fatura SEGUINTE e ganha um mês inteiro antes de ser cobrada.
     const melhorDia = new Date(ciclo.fechamento);
     melhorDia.setDate(melhorDia.getDate() + 1);
 
@@ -293,13 +294,32 @@ export class CardStatementService {
 
     const diasAteFechamento = this.diasEntre(referencia, ciclo.fechamento);
     const prazoComprandoHoje = this.diasEntre(referencia, vencimentoDaCompraHoje);
-    const prazoSeEsperar = this.diasEntre(melhorDia, vencimentoSeEsperar);
-    const ganhoEmDias = prazoSeEsperar - prazoComprandoHoje + diasAteFechamento;
+    const prazoSeEsperar =
+      this.diasEntre(melhorDia, vencimentoSeEsperar) + diasAteFechamento;
+    const ganhoEmDias = prazoSeEsperar - prazoComprandoHoje;
 
-    // Faltando um ou dois dias para fechar, esperar quase não custa nada e
-    // rende um mês inteiro de prazo. Perto do início do ciclo, esperar 25 dias
-    // por uma compra que já se quer fazer raramente compensa.
-    const valeEsperar = diasAteFechamento <= 5 && ganhoEmDias > 0;
+    // O ciclo acabou de abrir: hoje JÁ é o melhor dia, porque a compra de hoje
+    // entra numa fatura que só fecha daqui a um mês. Não há o que esperar.
+    const hoje = new Date(referencia);
+    hoje.setHours(0, 0, 0, 0);
+    const cicloRecemAberto = this.diasEntre(ciclo.inicio, hoje) <= 0;
+
+    // A REGRA, dita pelo usuário: a recomendação aponta SEMPRE para depois do
+    // fechamento. Enquanto a fatura atual estiver aberta, qualquer compra feita
+    // hoje é cobrada no vencimento mais próximo — esperar o fechamento não é
+    // uma otimização de beira de prazo, vale o ciclo inteiro.
+    //
+    // A versão anterior só recomendava esperar faltando 5 dias ou menos para
+    // fechar. Com fechamento no dia 07, quem consultasse no dia 01 ouvia
+    // "compre hoje" e perdia um mês de prazo.
+    const valeEsperar = !cicloRecemAberto && ganhoEmDias > 0;
+
+    const avisoDeFechamento =
+      diasAteFechamento === 0
+        ? 'A fatura atual fecha HOJE.'
+        : diasAteFechamento === 1
+          ? `A fatura atual fecha amanhã (${this.formatarData(ciclo.fechamento)}).`
+          : `Faltam ${diasAteFechamento} dias para a fatura atual fechar (${this.formatarData(ciclo.fechamento)}).`;
 
     return {
       cardId: card.id,
@@ -308,14 +328,18 @@ export class CardStatementService {
       dueDate: ciclo.vencimento,
       daysUntilClosing: diasAteFechamento,
 
+      /** Fica em destaque no painel, acima da recomendação. */
+      closingNotice: avisoDeFechamento,
+
       bestDate: melhorDia,
       recommendation: valeEsperar
-        ? `Esperar até ${this.formatarData(melhorDia)} joga a compra para a próxima fatura e dá ${ganhoEmDias} dia(s) a mais para pagar.`
-        : `Comprar hoje já entra na fatura que vence em ${this.formatarData(vencimentoDaCompraHoje)}, com ${prazoComprandoHoje} dia(s) de prazo.`,
+        ? `Melhor comprar a partir de ${this.formatarData(melhorDia)} — o dia seguinte ao fechamento. A compra cai na próxima fatura e você ganha ${ganhoEmDias} dia(s) a mais para pagar. Comprando hoje, vence em ${this.formatarData(vencimentoDaCompraHoje)}.`
+        : `Hoje é o melhor momento: o ciclo acabou de abrir e a compra só vence em ${this.formatarData(vencimentoDaCompraHoje)}, com ${prazoComprandoHoje} dia(s) de prazo.`,
       shouldWait: valeEsperar,
 
       daysToPayIfBuyToday: prazoComprandoHoje,
-      daysToPayIfWait: prazoSeEsperar + diasAteFechamento,
+      daysToPayIfWait: prazoSeEsperar,
+      extraDaysIfWait: ganhoEmDias,
     };
   }
 

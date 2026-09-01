@@ -53,7 +53,73 @@ export class ClassificationRulesService {
     { keyword: 'AGUA', category: 'Moradia', matchType: 'keyword' },
     { keyword: 'INTERNET', category: 'Moradia', matchType: 'keyword' },
     { keyword: 'TELEFONE', category: 'Moradia', matchType: 'keyword' },
+
+    // Como os estabelecimentos aparecem DE VERDADE numa fatura brasileira.
+    // Numa fatura real deste sistema, "Ifd*New Brown" (iFood), "99Food",
+    // "Drogasil2834" e os pedágios de tag ficaram todos sem categoria — e cada
+    // linha sem categoria é uma que o usuário teria de classificar na mão.
+    { keyword: 'IFD*', category: 'Alimentação', matchType: 'keyword' },
+    { keyword: '99FOOD', category: 'Alimentação', matchType: 'keyword' },
+    { keyword: 'RAPPI', category: 'Alimentação', matchType: 'keyword' },
+    { keyword: 'LANCHONETE', category: 'Alimentação', matchType: 'keyword' },
+    { keyword: 'CONFEITARIA', category: 'Alimentação', matchType: 'keyword' },
+    { keyword: 'SUSHI', category: 'Alimentação', matchType: 'keyword' },
+    { keyword: 'FOOD', category: 'Alimentação', matchType: 'keyword' },
+    { keyword: 'GELATO', category: 'Alimentação', matchType: 'keyword' },
+    { keyword: 'SORVETE', category: 'Alimentação', matchType: 'keyword' },
+
+    { keyword: 'DROGASIL', category: 'Saúde', matchType: 'keyword' },
+    { keyword: 'DROGA RAIA', category: 'Saúde', matchType: 'keyword' },
+    { keyword: 'RAIADROGASIL', category: 'Saúde', matchType: 'keyword' },
+    { keyword: 'PACHECO', category: 'Saúde', matchType: 'keyword' },
+    { keyword: 'PANVEL', category: 'Saúde', matchType: 'keyword' },
+    { keyword: 'LABORATORIO', category: 'Saúde', matchType: 'keyword' },
+    { keyword: 'CLINICA', category: 'Saúde', matchType: 'keyword' },
+
+    { keyword: 'ATACADAO', category: 'Supermercado', matchType: 'keyword' },
+    { keyword: 'ASSAI', category: 'Supermercado', matchType: 'keyword' },
+    { keyword: 'CARREFOUR', category: 'Supermercado', matchType: 'keyword' },
+    { keyword: 'PAO DE ACUCAR', category: 'Supermercado', matchType: 'keyword' },
+    { keyword: 'HORTIFRUTI', category: 'Supermercado', matchType: 'keyword' },
+    { keyword: 'SUPERMERCADO', category: 'Supermercado', matchType: 'keyword' },
+
+    { keyword: 'SHELL', category: 'Combustível', matchType: 'keyword' },
+    { keyword: 'IPIRANGA', category: 'Combustível', matchType: 'keyword' },
+    { keyword: 'PETROBRAS', category: 'Combustível', matchType: 'keyword' },
+
+    // Pedágio e estacionamento são transporte, não "outros".
+    { keyword: 'NUTAG', category: 'Transporte', matchType: 'keyword' },
+    { keyword: 'SEM PARAR', category: 'Transporte', matchType: 'keyword' },
+    { keyword: 'CONECTCAR', category: 'Transporte', matchType: 'keyword' },
+    { keyword: 'VELOE', category: 'Transporte', matchType: 'keyword' },
+    { keyword: 'ESTACIONAMENTO', category: 'Transporte', matchType: 'keyword' },
+    { keyword: 'CABIFY', category: 'Transporte', matchType: 'keyword' },
+
+    { keyword: 'APPLE.COM', category: 'Assinaturas', matchType: 'keyword' },
+    { keyword: 'ANTHROPIC', category: 'Assinaturas', matchType: 'keyword' },
+    { keyword: 'OPENAI', category: 'Assinaturas', matchType: 'keyword' },
+    { keyword: 'AMAZON PRIME', category: 'Assinaturas', matchType: 'keyword' },
+    { keyword: 'PRIME CANAIS', category: 'Assinaturas', matchType: 'keyword' },
+    { keyword: 'DISNEY', category: 'Assinaturas', matchType: 'keyword' },
+    { keyword: 'ICLOUD', category: 'Assinaturas', matchType: 'keyword' },
+    { keyword: 'ULTRAVIOLETA', category: 'Assinaturas', matchType: 'keyword' },
+
+    { keyword: 'MERCADO LIVRE', category: 'Compras', matchType: 'keyword' },
+    { keyword: 'MERCADOLIVRE', category: 'Compras', matchType: 'keyword' },
+    { keyword: 'MAGAZINE', category: 'Compras', matchType: 'keyword' },
+    { keyword: 'ALIEXPRESS', category: 'Compras', matchType: 'keyword' },
+
+    { keyword: 'BARBEARIA', category: 'Lazer', matchType: 'keyword' },
+    { keyword: 'BARBER', category: 'Lazer', matchType: 'keyword' },
+    { keyword: 'CINEMARK', category: 'Lazer', matchType: 'keyword' },
+    { keyword: 'TICKETMASTER', category: 'Lazer', matchType: 'keyword' },
+    { keyword: 'INGRESSO', category: 'Lazer', matchType: 'keyword' },
   ];
+
+  /** As mesmas regras padrão, da palavra mais longa para a mais curta. */
+  private readonly regrasPadraoOrdenadas = [...this.defaultRules].sort(
+    (a, b) => b.keyword.length - a.keyword.length,
+  );
 
   constructor(
     @InjectRepository(ClassificationRule)
@@ -86,8 +152,13 @@ export class ClassificationRulesService {
       }
     }
 
-    // Try default rules
-    for (const defaultRule of this.defaultRules) {
+    // Regras padrão, da MAIS ESPECÍFICA para a mais genérica.
+    //
+    // A ordem importa e o arquivo não pode depender de quem foi escrito
+    // primeiro: "Amazon Prime Canais" casa com AMAZON (Compras) e com
+    // AMAZON PRIME (Assinaturas), e "Mercado Livre" casa com MERCADO
+    // (Supermercado). A palavra mais longa é a que descreve melhor.
+    for (const defaultRule of this.regrasPadraoOrdenadas) {
       if (this.matchesRuleData(description, defaultRule)) {
         return {
           category: defaultRule.category,
