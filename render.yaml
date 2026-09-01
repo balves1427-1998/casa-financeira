@@ -63,8 +63,15 @@ services:
       - key: FRONTEND_URL
         sync: false
 
-      # SMTP — opcional. Sem estas variáveis os alertas por e-mail ficam
-      # desativados, mas o restante do sistema funciona normalmente.
+      # SMTP — necessário para os LEMBRETES DE VENCIMENTO chegarem por e-mail.
+      #
+      # Sem estas variáveis o sistema continua funcionando e os avisos aparecem
+      # dentro da aplicação, mas nenhum e-mail é entregue. O registro fica
+      # marcado como falha com o motivo — nunca como "enviado".
+      #
+      # Para o Gmail, use uma SENHA DE APLICATIVO (myaccount.google.com →
+      # Segurança → Senhas de app), nunca a senha da conta:
+      #   SMTP_HOST=smtp.gmail.com  SMTP_PORT=587
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
@@ -75,6 +82,18 @@ services:
         sync: false
       - key: EMAIL_FROM
         sync: false
+
+      # Segredo do disparo externo dos lembretes.
+      #
+      # POR QUE ELE EXISTE: no plano gratuito o serviço HIBERNA após ~15 min sem
+      # tráfego, e o agendador interno (@Cron às 10h e 19h) não dispara com o
+      # processo dormindo. Um agendador externo gratuito chama
+      # `POST /reminders/dispatch` nos dois horários, acordando o serviço.
+      #
+      # Sem esta variável a rota recusa qualquer chamada — deixá-la aberta
+      # permitiria que qualquer um disparasse e-mails para a casa.
+      - key: REMINDER_DISPATCH_TOKEN
+        generateValue: true
 
   # ==================== Redis (filas do Bull) ====================
   - type: redis

@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import * as handlebars from 'handlebars';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as nodemailer from 'nodemailer';
 import { EmailLog, EmailType, EmailStatus } from '../entities/email-log.entity';
 import {
   SendEmailDto,
@@ -13,20 +14,77 @@ import {
 } from '../dtos/email.dto';
 
 /**
- * Serviço de Email com suporte a templates Handlebars
- * Integra-se com providers SMTP/SES
- * Suporta enfileiramento via Bull (futuro)
+ * Serviço de Email — envio real por SMTP, com templates Handlebars.
+ *
+ * O QUE MUDOU E POR QUÊ
+ * ---------------------
+ * Este serviço NÃO enviava e-mail nenhum. O método `simulateSend` esperava
+ * 100ms, sorteava 5% de falha e gravava `status = SENT` no log. Ou seja: o
+ * histórico dizia "enviado" e nada tinha saído — pior do que não enviar, porque
+ * escondia a ausência.
+ *
+ * Agora o envio é real, via `nodemailer`. E quando o SMTP não está configurado,
+ * o e-mail é marcado como FALHO com o motivo explícito, nunca como enviado. Um
+ * lembrete de vencimento que o sistema jura ter mandado, e que não chegou, é a
+ * pior falha possível para esta funcionalidade.
  */
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
   private templatesCache: Map<string, HandlebarsTemplateDelegate<any>> = new Map();
 
+  /** Criado sob demanda; nulo quando não há SMTP configurado. */
+  private transporter: nodemailer.Transporter | null = null;
+  private transporterVerificado = false;
+
   constructor(
     @InjectRepository(EmailLog)
     private emailLogRepository: Repository<EmailLog>,
   ) {
     this.registerHandlebarsHelpers();
+  }
+
+  /**
+   * Diz se o envio de e-mail está configurado.
+   *
+   * Usado pelo motor de lembretes para avisar no log — e pelo endpoint de
+   * diagnóstico — em vez de acumular falhas silenciosas.
+   */
+  get smtpConfigurado(): boolean {
+    return Boolean(
+      process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD,
+    );
+  }
+
+  /**
+   * Transporter SMTP, criado na primeira necessidade.
+   *
+   * As credenciais vêm SEMPRE de variáveis de ambiente — nunca do banco, nunca
+   * de parâmetro de requisição. Senha de e-mail não trafega pela API.
+   */
+  private getTransporter(): nodemailer.Transporter | null {
+    if (!this.smtpConfigurado) {
+      return null;
+    }
+
+    if (this.transporter) {
+      return this.transporter;
+    }
+
+    const porta = Number(process.env.SMTP_PORT) || 587;
+
+    this.transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: porta,
+      // 465 é TLS implícito; 587 usa STARTTLS, negociado depois da conexão.
+      secure: porta === 465,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASSWORD,
+      },
+    });
+
+    return this.transporter;
   }
 
   /**
@@ -59,9 +117,9 @@ export class EmailService {
 
       const savedLog = await this.emailLogRepository.save(emailLog);
 
-      // Aqui seria enfileirado em Bull para envio assíncrono
-      // Por enquanto, simular envio
-      await this.simulateSend(savedLog);
+      // Envio síncrono: o volume aqui é de poucas mensagens por dia, e
+      // enfileirar acrescentaria uma peça a mais para falhar.
+      await this.entregar(savedLog);
 
       this.logger.log(
         `Email enfileirado para ${dto.recipient}: ${dto.subject} (${dto.type})`,
@@ -72,7 +130,7 @@ export class EmailService {
         emailLogId: savedLog.id,
         recipient: savedLog.recipient,
         sentAt: new Date(),
-        messageId: `msg-${Date.now()}`, // Mock message ID
+        messageId: savedLog.messageId,
       };
     } catch (error) {
       this.logger.error(`Erro ao enviar email: ${error.message}`, error.stack);
@@ -184,7 +242,7 @@ export class EmailService {
     for (const email of failedEmails) {
       if (email.retryCount < maxRetries) {
         try {
-          await this.simulateSend(email);
+          await this.entregar(email);
           email.retryCount++;
           email.status = EmailStatus.SENT;
           email.sentAt = new Date();
@@ -276,28 +334,69 @@ export class EmailService {
   }
 
   /**
-   * Simular envio de email (antes de integração real com SES/SMTP)
+   * Envia o e-mail de verdade e atualiza o log com o resultado.
+   *
+   * Nunca marca como enviado sem ter enviado: sem SMTP configurado, o registro
+   * fica FAILED com o motivo. É o que permite descobrir, olhando o histórico,
+   * por que um lembrete não chegou.
    */
-  private async simulateSend(emailLog: EmailLog): Promise<void> {
-    // Simular delay de envio
-    await new Promise((resolve) => setTimeout(resolve, 100));
+  private async entregar(emailLog: EmailLog): Promise<void> {
+    const transporter = this.getTransporter();
 
-    // Simular 95% de sucesso (5% de falha)
-    const willFail = Math.random() < 0.05;
+    if (!transporter) {
+      emailLog.status = EmailStatus.FAILED;
+      emailLog.errorMessage =
+        'SMTP não configurado. Defina SMTP_HOST, SMTP_PORT, SMTP_USER, ' +
+        'SMTP_PASSWORD e EMAIL_FROM nas variáveis de ambiente do servidor.';
 
-    if (willFail) {
-      throw new Error('Falha simulada ao enviar email');
+      await this.emailLogRepository.save(emailLog);
+
+      // Um aviso por processo: repetir a cada e-mail encheria o log sem
+      // acrescentar informação.
+      if (!this.transporterVerificado) {
+        this.transporterVerificado = true;
+        this.logger.warn(
+          'SMTP não configurado: nenhum e-mail será entregue. Os lembretes ' +
+            'continuam sendo registrados e aparecem como alerta na aplicação.',
+        );
+      }
+
+      throw new Error(emailLog.errorMessage);
     }
 
-    emailLog.status = EmailStatus.SENT;
-    emailLog.sentAt = new Date();
-    emailLog.messageId = `msg-${Date.now()}-${Math.random().toString(36)}`;
+    try {
+      const resultado = await transporter.sendMail({
+        from:
+          process.env.EMAIL_FROM ||
+          process.env.SMTP_USER ||
+          'nao-responda@casa-financeira',
+        to: emailLog.recipient,
+        subject: emailLog.subject,
+        html: emailLog.htmlContent,
+      });
 
-    await this.emailLogRepository.save(emailLog);
+      emailLog.status = EmailStatus.SENT;
+      emailLog.sentAt = new Date();
+      emailLog.messageId = resultado.messageId;
 
-    this.logger.debug(
-      `Email simulado enviado para ${emailLog.recipient} (${emailLog.type})`,
-    );
+      await this.emailLogRepository.save(emailLog);
+
+      this.logger.log(
+        `E-mail entregue a ${emailLog.recipient} (${emailLog.type})`,
+      );
+    } catch (erro) {
+      emailLog.status = EmailStatus.FAILED;
+      emailLog.errorMessage =
+        erro instanceof Error ? erro.message : String(erro);
+
+      await this.emailLogRepository.save(emailLog);
+
+      this.logger.error(
+        `Falha ao entregar e-mail a ${emailLog.recipient}: ${emailLog.errorMessage}`,
+      );
+
+      throw erro;
+    }
   }
 
   /**

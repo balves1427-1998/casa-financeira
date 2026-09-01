@@ -127,6 +127,80 @@ lance uma receita e uma despesa e gere um relatório.
 
 ---
 
+## Lembretes de vencimento: fazer o disparo acontecer
+
+Os lembretes saem **duas vezes por dia — 10h e 19h (horário de Brasília)** — e
+continuam até a conta ser marcada como paga.
+
+### 1. Configurar o e-mail
+
+Sem SMTP, os avisos continuam aparecendo **dentro da aplicação**, mas nenhum
+e-mail é entregue. O sistema nunca finge ter enviado: o registro fica marcado
+como falha, com o motivo.
+
+No Render → *Environment*:
+
+```
+SMTP_HOST     = smtp.gmail.com
+SMTP_PORT     = 587
+SMTP_USER     = seu-email@gmail.com
+SMTP_PASSWORD = <SENHA DE APLICATIVO>
+EMAIL_FROM    = seu-email@gmail.com
+```
+
+> Para o Gmail é obrigatório usar uma **senha de aplicativo**
+> (myaccount.google.com → Segurança → Senhas de app), nunca a senha da conta.
+> A senha fica só nas variáveis do servidor — ela não trafega pela API nem é
+> gravada no banco.
+
+### 2. Agendar o disparo externo — este passo é necessário
+
+A aplicação tem um agendador interno nos dois horários, **mas ele não basta no
+plano gratuito**: o Render hiberna o serviço após ~15 minutos sem tráfego, e um
+cron dentro de um processo dormindo simplesmente não dispara. Sem o passo
+abaixo, os lembretes só sairiam por coincidência — quando alguém estivesse
+usando o sistema no exato horário.
+
+O blueprint gera a variável `REMINDER_DISPATCH_TOKEN` automaticamente. Copie o
+valor em *Environment* e cadastre **duas tarefas** num agendador gratuito
+(cron-job.org, EasyCron, GitHub Actions):
+
+| Horário (Brasília) | Método | URL | Corpo |
+|---|---|---|---|
+| 10:00 | POST | `https://sua-api.onrender.com/reminders/dispatch` | `{"window":"morning"}` |
+| 19:00 | POST | `https://sua-api.onrender.com/reminders/dispatch` | `{"window":"evening"}` |
+
+Cabeçalhos, nos dois casos:
+
+```
+Content-Type: application/json
+x-reminder-token: <valor de REMINDER_DISPATCH_TOKEN>
+```
+
+A chamada acorda o serviço e executa o envio. Chamar duas vezes não manda o
+aviso duas vezes: cada lembrete é registrado com índice único por
+(conta, dia, janela).
+
+### 3. Conferir se está funcionando
+
+Logado no sistema:
+
+```
+GET /reminders/status
+```
+
+Responde se o SMTP está configurado, se o disparo externo está habilitado e
+lista os últimos envios com o motivo de eventuais falhas — sem precisar abrir o
+log do servidor.
+
+Para testar na hora, ainda logado:
+
+```
+POST /reminders/test    { "window": "morning" }
+```
+
+---
+
 ## Variáveis de ambiente — referência
 
 ### Backend (obrigatórias)
@@ -142,12 +216,15 @@ lance uma receita e uma despesa e gere um relatório.
 
 `PORT` é injetada pela plataforma — não defina manualmente.
 
-### Backend (opcionais — alertas por e-mail)
+### Backend — lembretes de vencimento
 
-`SMTP_HOST` · `SMTP_PORT` · `SMTP_USER` · `SMTP_PASSWORD` · `EMAIL_FROM`
+| Variável | Para quê |
+|---|---|
+| `SMTP_HOST` · `SMTP_PORT` · `SMTP_USER` · `SMTP_PASSWORD` · `EMAIL_FROM` | Entrega dos e-mails. Sem elas os avisos aparecem só dentro da aplicação |
+| `REMINDER_DISPATCH_TOKEN` | Segredo do disparo externo. Sem ele a rota `/reminders/dispatch` recusa qualquer chamada |
 
-Sem elas o sistema funciona normalmente; apenas os lembretes de vencimento não
-são enviados.
+Detalhes na seção **Lembretes de vencimento** acima — em especial o passo do
+agendador externo, sem o qual os avisos não saem no plano gratuito.
 
 ### Frontend
 
