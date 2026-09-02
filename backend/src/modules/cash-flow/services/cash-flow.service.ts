@@ -70,12 +70,29 @@ export class CashFlowService {
     // realidade para os dois.
     const userIds = await this.scopeUserIds(user);
 
-    const expenses = await this.expenseRepository.find({
+    /**
+     * COMPRA NO CRÉDITO NÃO TIRA DINHEIRO DA CONTA NO DIA DA COMPRA.
+     *
+     * Ela entra numa fatura que vence semanas depois, e a fatura já aparece no
+     * Planejado como um único compromisso. Contar as duas coisas debitaria o
+     * mesmo dinheiro duas vezes: uma no dia do supermercado, outra no
+     * vencimento.
+     *
+     * Por isso o caixa ignora aqui as compras pagas no cartão — quem representa
+     * esse dinheiro na projeção é a fatura, na data em que vence. As compras
+     * continuam inteiras na aba Despesas: muda só QUANDO o dinheiro sai, não se
+     * ele foi gasto.
+     */
+    const todasAsDespesas = await this.expenseRepository.find({
       where: {
         userId: In(userIds),
         date: Between(startDate, endDate),
       },
     });
+
+    const expenses = todasAsDespesas.filter(
+      (e) => !(e.paymentMethod === 'credit' && e.creditCardId),
+    );
 
     const incomes = await this.incomeRepository.find({
       where: {

@@ -12,6 +12,7 @@ import {
   CategoryType,
 } from '@/types/category';
 import { formatBRL } from '@/utils/format';
+import { lerCampoMoeda, paraCampoMoeda } from '@/utils/money';
 
 interface CategoryFormState {
   name: string;
@@ -36,13 +37,6 @@ const emptyForm = (): CategoryFormState => ({
   isRecurring: false,
   displayOrder: '',
 });
-
-/** Converte "1.200,50" ou "1200.50" em número. */
-function parseAmount(raw: string): number {
-  const normalized = raw.trim().replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : NaN;
-}
 
 export default function CategoriesPage() {
   const {
@@ -139,7 +133,7 @@ export default function CategoriesPage() {
       monthlyBudget:
         categoria.monthlyBudget === undefined || categoria.monthlyBudget === null
           ? ''
-          : String(categoria.monthlyBudget),
+          : paraCampoMoeda(categoria.monthlyBudget),
       isRecurring: Boolean(categoria.isRecurring),
       displayOrder: String(categoria.displayOrder ?? 0),
     });
@@ -168,7 +162,7 @@ export default function CategoriesPage() {
 
     let orcamento: number | undefined;
     if (form.monthlyBudget.trim()) {
-      orcamento = parseAmount(form.monthlyBudget);
+      orcamento = lerCampoMoeda(form.monthlyBudget);
       if (!Number.isFinite(orcamento) || orcamento < 0) {
         setValidationError(
           'Orçamento mensal inválido. Informe um valor igual ou maior que zero. Ex.: 1.200,00',

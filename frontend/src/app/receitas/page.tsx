@@ -23,6 +23,7 @@ import {
   toIncomeAmount,
 } from '@/types/income';
 import { formatBRL, formatDateBR, formatPercent } from '@/utils/format';
+import { lerCampoMoeda, paraCampoMoeda } from '@/utils/money';
 import {
   AlertCircle,
   Check,
@@ -85,13 +86,6 @@ const emptyForm = (): IncomeFormState => ({
   frequency: IncomeFrequency.MONTHLY,
   observation: '',
 });
-
-/** Converte "8.500,00" ou "8500.00" em número. */
-function parseAmount(raw: string): number {
-  const normalized = raw.trim().replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : NaN;
-}
 
 /** Data ISO (`2026-08-26T00:00:00Z`) → valor de `<input type="date">`. */
 function toDateInput(value: Date | string | null | undefined): string {
@@ -225,7 +219,7 @@ export default function ReceitasPage() {
     setForm({
       description: income.description,
       type: (income.type as IncomeType) || IncomeType.OTHER,
-      amount: String(toIncomeAmount(income.amount)),
+      amount: paraCampoMoeda(toIncomeAmount(income.amount)),
       date: toDateInput(income.date),
       accountId: income.accountId,
       responsible: income.responsible,
@@ -243,7 +237,7 @@ export default function ReceitasPage() {
     setFeedback(null);
     setValidationError(null);
 
-    const amount = parseAmount(form.amount);
+    const amount = lerCampoMoeda(form.amount);
 
     if (!form.description.trim()) {
       setValidationError('Informe a descrição da receita.');

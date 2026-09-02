@@ -87,6 +87,20 @@ export class PlannedAccount {
   @Column({ nullable: true })
   recurringIncomeId?: string;
 
+  /**
+   * Competência da fatura de cartão que esta linha representa ("2026-09").
+   *
+   * Preenchida só quando a linha É uma fatura. Junto com `creditCardId`, é a
+   * chave que faz a importação SUBSTITUIR a projeção do mês em vez de criar
+   * uma segunda linha para o mesmo cartão.
+   */
+  @Column({ nullable: true })
+  invoiceCompetencia?: string;
+
+  /** Importação de PDF que gerou/atualizou esta fatura. */
+  @Column({ nullable: true })
+  pdfImportId?: string;
+
   @Column({ nullable: true })
   paymentDate?: Date;
 

@@ -22,6 +22,8 @@ import {
   PlannedFrequency,
 } from '@/types/planned-account';
 import { formatBRL, formatDateBR } from '@/utils/format';
+import { lerCampoMoeda, paraCampoMoeda } from '@/utils/money';
+import { PlanejadoRealizado } from '@/components/PlanejadoRealizado';
 
 interface PlannedFormState {
   description: string;
@@ -54,13 +56,6 @@ const emptyForm = (): PlannedFormState => ({
   priority: '1',
   observation: '',
 });
-
-/** Converte "1.200,50" ou "1200.50" em número. */
-function parseAmount(raw: string): number {
-  const normalized = raw.trim().replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : NaN;
-}
 
 /** Data ISO (`2026-09-05T00:00:00Z`) → valor de `<input type="date">`. */
 function toDateInput(value: string | Date | null | undefined): string {
@@ -219,7 +214,7 @@ export default function PlannedPage() {
     setForm({
       description: account.description || '',
       category: account.category || '',
-      amount: String(account.amount ?? ''),
+      amount: paraCampoMoeda(account.amount),
       dueDate: toDateInput(account.dueDate),
       responsible: account.responsible || 'bruno',
       accountId: account.accountId || '',
@@ -246,7 +241,7 @@ export default function PlannedPage() {
       return;
     }
 
-    const valor = parseAmount(form.amount);
+    const valor = lerCampoMoeda(form.amount);
     if (!Number.isFinite(valor) || valor < 0.01) {
       setValidationError('Informe um valor de pelo menos R$ 0,01. Ex.: 1.800,00');
       return;
@@ -367,6 +362,9 @@ export default function PlannedPage() {
           ➕ Nova Conta
         </Button>
       </div>
+
+      {/* Execução do orçamento no mês, antes da lista de contas. */}
+      <PlanejadoRealizado />
 
       {/* Erro da API */}
       {error && (

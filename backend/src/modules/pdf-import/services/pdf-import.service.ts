@@ -4,6 +4,8 @@ import { Repository } from 'typeorm';
 import { PdfImport } from '../entities/pdf-import.entity';
 import { User } from '../../users/entities/user.entity';
 import { Expense } from '../../expenses/entities/expense.entity';
+import { CreditCard } from '../../credit-cards/entities/credit-card.entity';
+import { PlannedAccount } from '../../planned-accounts/entities/planned-account.entity';
 import { ClassificationRulesService } from '../../classification-rules/classification-rules.service';
 import { PdfParserService } from './pdf-parser.service';
 import { DuplicateDetectorService } from './duplicate-detector.service';
@@ -15,6 +17,10 @@ export class PdfImportService {
     private pdfImportRepository: Repository<PdfImport>,
     @InjectRepository(Expense)
     private expensesRepository: Repository<Expense>,
+    @InjectRepository(CreditCard)
+    private cardsRepository: Repository<CreditCard>,
+    @InjectRepository(PlannedAccount)
+    private plannedRepository: Repository<PlannedAccount>,
     private pdfParserService: PdfParserService,
     private duplicateDetectorService: DuplicateDetectorService,
     private classificationRulesService: ClassificationRulesService,
@@ -203,6 +209,11 @@ export class PdfImportService {
       ? pdfImport.extractedData
       : Object.values(pdfImport.extractedData || {});
 
+    // Quando a fatura vence — e, por consequência, em que competência ela cai.
+    // Vem do cartão; a data de cada compra não serve, porque compras de julho e
+    // de agosto pertencem à MESMA fatura.
+    const fatura = await this.calcularFatura(pdfImport, transactions);
+
     const errors: any[] = [];
     let imported = 0;
     let skipped = 0;
@@ -251,6 +262,11 @@ export class PdfImportService {
           category: ajuste?.category || tx.suggestedCategory || 'Outros',
           subcategory: ajuste?.category ? undefined : tx.suggestedSubcategory,
           responsible: ajuste?.responsible || responsavelPadrao,
+          // `date` = onde o dinheiro foi gasto. `dueDate` = quando ele sai.
+          // Numa compra no crédito as duas são diferentes, e é essa distinção
+          // que impede o caixa de debitar a compra no dia em que ela é feita.
+          dueDate: fatura?.vencimento ?? new Date(tx.date),
+          invoiceCompetencia: fatura?.competencia,
           paymentMethod: 'credit',
           // Sem o cartão, a compra importada não conta no limite utilizado —
           // a fatura entrava e o cartão continuava "zerado".
@@ -282,7 +298,174 @@ export class PdfImportService {
 
     await this.pdfImportRepository.save(pdfImport);
 
-    return { imported, skipped, errors };
+    // A fatura inteira vira UM compromisso no Planejado.
+    const planejado = fatura
+      ? await this.registrarFaturaNoPlanejado(
+          user,
+          pdfImport,
+          fatura,
+          responsavelPadrao,
+        )
+      : null;
+
+    return {
+      imported,
+      skipped,
+      errors,
+      fatura: planejado
+        ? {
+            competencia: fatura!.competencia,
+            vencimento: fatura!.vencimento,
+            total: fatura!.total,
+            substituiuProjecao: planejado.substituiu,
+          }
+        : null,
+    } as any;
+  }
+
+  /**
+   * Vencimento, competência e total da fatura importada.
+   *
+   * O total é a soma dos lançamentos LIDOS (débitos menos estornos), e não só
+   * dos que foram gravados: reimportar a mesma fatura grava zero despesas por
+   * duplicidade, mas a fatura continua valendo o que vale. Se o total viesse do
+   * que foi inserido, a segunda importação zeraria o compromisso do mês.
+   */
+  private async calcularFatura(
+    pdfImport: PdfImport,
+    transactions: any[],
+  ): Promise<{
+    vencimento: Date;
+    competencia: string;
+    total: number;
+    cardName: string;
+  } | null> {
+    if (!pdfImport.creditCardId) return null;
+
+    const card = await this.cardsRepository.findOne({
+      where: { id: pdfImport.creditCardId },
+    });
+    if (!card) return null;
+
+    const total = transactions.reduce((soma, tx) => {
+      const valor = Number(tx.amount) || 0;
+      return tx.type === 'credit' ? soma - valor : soma + valor;
+    }, 0);
+
+    // A competência é a da compra mais recente da fatura: é o ciclo que ela
+    // fecha. Usar "hoje" erraria ao importar uma fatura antiga.
+    const datas = transactions
+      .map((tx) => new Date(tx.date))
+      .filter((d) => !Number.isNaN(d.getTime()))
+      .sort((a, b) => b.getTime() - a.getTime());
+
+    const referencia = datas[0] ?? new Date();
+
+    // Vencimento no mês seguinte ao fechamento quando o dia de vencimento é
+    // anterior ao de fechamento — cartão que fecha dia 28 e vence dia 5.
+    const mesDoVencimento =
+      card.dueDay > card.closingDay
+        ? referencia.getMonth()
+        : referencia.getMonth() + 1;
+
+    const vencimento = new Date(
+      referencia.getFullYear(),
+      mesDoVencimento,
+      card.dueDay,
+      12,
+      0,
+      0,
+    );
+
+    const competencia = `${vencimento.getFullYear()}-${String(
+      vencimento.getMonth() + 1,
+    ).padStart(2, '0')}`;
+
+    return {
+      vencimento,
+      competencia,
+      total: Number(total.toFixed(2)),
+      cardName: card.name,
+    };
+  }
+
+  /**
+   * Cria — ou SUBSTITUI — a fatura do mês no Planejado.
+   *
+   * A regra pedida: uma projeção de R$ 1.000 para o cartão vira R$ 1.500 quando
+   * a fatura real chega. Por isso a busca é por (cartão, competência) e não por
+   * descrição: o usuário escreve o nome que quiser na projeção.
+   *
+   * Uma fatura já marcada como PAGA não é mexida — reimportar o PDF não pode
+   * desfazer um pagamento que já aconteceu.
+   */
+  private async registrarFaturaNoPlanejado(
+    user: User,
+    pdfImport: PdfImport,
+    fatura: { vencimento: Date; competencia: string; total: number; cardName: string },
+    responsavel: string,
+  ): Promise<{ substituiu: boolean }> {
+    // A projeção que o usuário criou à mão NÃO tem competência — ele só
+    // escolheu o cartão e uma data. Procurar apenas por competência criaria uma
+    // segunda linha e o mês apareceria com a fatura contada duas vezes.
+    //
+    // Por isso a busca aceita as duas formas: a linha já marcada com esta
+    // competência, ou qualquer linha daquele cartão que vença dentro do mês.
+    const [ano, mes] = fatura.competencia.split('-').map(Number);
+    const inicioDoMes = new Date(ano, mes - 1, 1);
+    const fimDoMes = new Date(ano, mes, 0, 23, 59, 59);
+
+    const existente = await this.plannedRepository
+      .createQueryBuilder('planned')
+      .where('planned.creditCardId = :cardId', {
+        cardId: pdfImport.creditCardId,
+      })
+      .andWhere(
+        '(planned.invoiceCompetencia = :competencia OR (planned.invoiceCompetencia IS NULL AND planned.dueDate BETWEEN :inicio AND :fim))',
+        { competencia: fatura.competencia, inicio: inicioDoMes, fim: fimDoMes },
+      )
+      // Uma linha já identificada como esta fatura tem precedência sobre uma
+      // projeção solta que só coincide no mês.
+      .orderBy(
+        'CASE WHEN planned.invoiceCompetencia IS NULL THEN 1 ELSE 0 END',
+        'ASC',
+      )
+      .getOne();
+
+    if (existente) {
+      if (existente.status === 'paid') {
+        return { substituiu: false };
+      }
+
+      const eraProjecao = !existente.invoiceCompetencia;
+
+      existente.amount = fatura.total;
+      existente.dueDate = fatura.vencimento;
+      existente.pdfImportId = pdfImport.id;
+      existente.invoiceCompetencia = fatura.competencia;
+      existente.description = `Fatura ${fatura.cardName}`;
+      existente.observation = `Importada de ${pdfImport.fileName}`;
+      await this.plannedRepository.save(existente);
+      return { substituiu: eraProjecao };
+    }
+
+    const nova = this.plannedRepository.create({
+      userId: user.id,
+      description: `Fatura ${fatura.cardName}`,
+      category: 'Cartão de crédito',
+      amount: fatura.total,
+      dueDate: fatura.vencimento,
+      responsible: responsavel,
+      creditCardId: pdfImport.creditCardId,
+      invoiceCompetencia: fatura.competencia,
+      pdfImportId: pdfImport.id,
+      type: 'expense',
+      status: 'pending',
+      observation: `Importada de ${pdfImport.fileName}`,
+    });
+
+    await this.plannedRepository.save(nova);
+    return { substituiu: false };
   }
 
   /**

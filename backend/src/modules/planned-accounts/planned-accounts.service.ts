@@ -268,6 +268,16 @@ export class PlannedAccountsService {
    * isso é o fato. O erro fica no log para conferência.
    */
   private async materializarLancamento(conta: PlannedAccount): Promise<void> {
+    // FATURA DE CARTÃO NÃO VIRA DESPESA.
+    //
+    // As compras dela já estão, uma a uma, na aba Despesas — foi a importação
+    // que as gravou. Criar mais um lançamento com o total somaria a fatura
+    // inteira em cima das próprias compras que a compõem, e o mês apareceria
+    // com o dobro do gasto no cartão.
+    if (conta.invoiceCompetencia && conta.creditCardId) {
+      return;
+    }
+
     try {
       if (conta.type === 'income') {
         const jaExiste = await this.incomeRepository.findOne({
@@ -364,5 +374,128 @@ export class PlannedAccountsService {
           priority: 1,
         })),
     ];
+  }
+
+  /**
+   * Planejado x Realizado de uma competência.
+   *
+   * O QUE CADA NÚMERO SIGNIFICA — e por que não são intercambiáveis:
+   *
+   *  - **planejado**: o que estava previsto para o mês (contas a pagar e a
+   *    receber, incluindo a fatura consolidada do cartão);
+   *  - **realizado**: o dinheiro que de fato ENTROU e SAIU da conta no mês.
+   *
+   * A sutileza está nas compras no cartão. Elas foram gastas no mês, mas o
+   * dinheiro só sai no vencimento da fatura — por isso não entram em "despesas
+   * realizadas" do mês da compra; quem entra é a fatura, quando marcada como
+   * paga. Somar as duas coisas contaria o mesmo dinheiro duas vezes.
+   *
+   * Para o número não sumir da vista, `comprasNoCartao` é devolvido à parte:
+   * é o gasto do mês no crédito, que vira compromisso do mês do vencimento.
+   */
+  async getPlanejadoRealizado(
+    user: User,
+    mes: number,
+    ano: number,
+  ): Promise<{
+    competencia: string;
+    receitasPlanejadas: number;
+    despesasPlanejadas: number;
+    receitasRealizadas: number;
+    despesasRealizadas: number;
+    variacaoReceitas: number;
+    variacaoDespesas: number;
+    saldoPlanejado: number;
+    saldoRealizado: number;
+    detalhe: {
+      faturasPlanejadas: number;
+      comprasNoCartao: number;
+      contasPagas: number;
+      contasPendentes: number;
+      contasVencidas: number;
+    };
+  }> {
+    if (mes < 1 || mes > 12 || ano < 2000 || ano > 2100) {
+      throw new NotFoundException('Competência inválida');
+    }
+
+    const userIds = await this.scopeUserIds(user);
+    const inicio = new Date(ano, mes - 1, 1);
+    const fim = new Date(ano, mes, 0, 23, 59, 59);
+
+    const [planejadas, despesas, receitas] = await Promise.all([
+      this.plannedAccountsRepository.find({
+        where: { userId: In(userIds), dueDate: Between(inicio, fim) },
+      }),
+      this.expenseRepository.find({
+        where: { userId: In(userIds), date: Between(inicio, fim) },
+      }),
+      this.incomeRepository.find({
+        where: { userId: In(userIds), date: Between(inicio, fim) },
+      }),
+    ]);
+
+    const somar = (itens: Array<{ amount: number | string }>) =>
+      // `amount` vem como STRING das colunas decimal: sem Number(), a soma
+      // vira concatenação de texto.
+      Number(
+        itens.reduce((total, i) => total + Number(i.amount || 0), 0).toFixed(2),
+      );
+
+    const emAberto = planejadas.filter(
+      (p) => p.status !== 'cancelled',
+    );
+
+    const receitasPlanejadas = somar(emAberto.filter((p) => p.type === 'income'));
+    const despesasPlanejadas = somar(emAberto.filter((p) => p.type !== 'income'));
+
+    const noCartao = despesas.filter(
+      (e) => e.paymentMethod === 'credit' && e.creditCardId,
+    );
+    const foraDoCartao = despesas.filter(
+      (e) => !(e.paymentMethod === 'credit' && e.creditCardId),
+    );
+
+    const faturasPagas = planejadas.filter(
+      (p) => p.invoiceCompetencia && p.creditCardId && p.status === 'paid',
+    );
+
+    const receitasRealizadas = somar(receitas);
+    const despesasRealizadas = Number(
+      (somar(foraDoCartao) + somar(faturasPagas)).toFixed(2),
+    );
+
+    return {
+      competencia: `${ano}-${String(mes).padStart(2, '0')}`,
+      receitasPlanejadas,
+      despesasPlanejadas,
+      receitasRealizadas,
+      despesasRealizadas,
+      // Positivo em receitas = recebeu mais do que esperava.
+      // Positivo em despesas = gastou MAIS do que planejou.
+      variacaoReceitas: Number(
+        (receitasRealizadas - receitasPlanejadas).toFixed(2),
+      ),
+      variacaoDespesas: Number(
+        (despesasRealizadas - despesasPlanejadas).toFixed(2),
+      ),
+      saldoPlanejado: Number(
+        (receitasPlanejadas - despesasPlanejadas).toFixed(2),
+      ),
+      saldoRealizado: Number(
+        (receitasRealizadas - despesasRealizadas).toFixed(2),
+      ),
+      detalhe: {
+        faturasPlanejadas: somar(
+          emAberto.filter((p) => p.invoiceCompetencia && p.creditCardId),
+        ),
+        comprasNoCartao: somar(noCartao),
+        contasPagas: emAberto.filter((p) => p.status === 'paid').length,
+        contasPendentes: emAberto.filter((p) =>
+          ['pending', 'confirmed'].includes(p.status),
+        ).length,
+        contasVencidas: emAberto.filter((p) => p.status === 'overdue').length,
+      },
+    };
   }
 }

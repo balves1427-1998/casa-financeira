@@ -709,6 +709,14 @@ class ApiClient {
     return response.data;
   }
 
+  /** Planejado x Realizado de uma competência. */
+  async getPlanejadoRealizado(mes: number, ano: number) {
+    const response = await this.client.get(
+      `/planned-accounts/summary/${mes}/${ano}`,
+    );
+    return response.data;
+  }
+
   // Cash flow endpoints
   //
   // Estes métodos existem porque o hook do Fluxo de Caixa chamava `fetch`

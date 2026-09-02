@@ -31,6 +31,21 @@ export class Expense {
   @Column({ nullable: true })
   creditCardId?: string;
 
+  /**
+   * Quando o dinheiro SAI de fato.
+   *
+   * Compra no crédito: o vencimento da fatura. Demais formas de pagamento: a
+   * própria data da despesa. É o que separa "onde gastei" (campo `date`) de
+   * "quando pago" — sem essa distinção, uma compra no cartão derrubava o saldo
+   * projetado no dia da compra.
+   */
+  @Column({ type: 'timestamp', nullable: true })
+  dueDate?: Date;
+
+  /** Competência da fatura em que esta compra entrou ("2026-09"). */
+  @Column({ nullable: true })
+  invoiceCompetencia?: string;
+
   @Column()
   description: string;
 

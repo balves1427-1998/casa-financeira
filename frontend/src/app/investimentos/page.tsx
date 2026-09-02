@@ -14,6 +14,7 @@ import {
   toGoalAmount,
 } from '@/types/goal';
 import { formatBRL, formatDateBR, formatPercent } from '@/utils/format';
+import { lerCampoMoeda, paraCampoMoeda } from '@/utils/money';
 import {
   AlertCircle,
   AlertTriangle,
@@ -62,14 +63,6 @@ const LIQUIDEZ_OPCOES = [
   'D+30',
   'No vencimento',
 ];
-
-/** Converte "15.000,00" ou "15000.00" em número. `NaN` quando inválido. */
-function parseAmount(raw: string): number {
-  const normalized = raw.trim().replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
-  if (!normalized) return NaN;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : NaN;
-}
 
 function toDateInput(value: Date | string | null | undefined): string {
   if (!value) return '';
@@ -141,7 +134,7 @@ export default function InvestimentosPage() {
       name: goal.name,
       type: (goal.type as GoalType) || GoalType.OTHER,
       targetAmount: goal.targetAmount ? String(toGoalAmount(goal.targetAmount)) : '',
-      currentAmount: String(toGoalAmount(goal.currentAmount)),
+      currentAmount: paraCampoMoeda(toGoalAmount(goal.currentAmount)),
       investedAmount:
         goal.investedAmount !== undefined && goal.investedAmount !== null
           ? String(toGoalAmount(goal.investedAmount))
@@ -169,15 +162,15 @@ export default function InvestimentosPage() {
     setValidationError(null);
 
     const temObjetivo = form.targetAmount.trim().length > 0;
-    const targetAmount = temObjetivo ? parseAmount(form.targetAmount) : 0;
+    const targetAmount = temObjetivo ? lerCampoMoeda(form.targetAmount) : 0;
     const investedAmount = form.investedAmount.trim()
-      ? parseAmount(form.investedAmount)
+      ? lerCampoMoeda(form.investedAmount)
       : undefined;
     const currentAmount = form.currentAmount.trim()
-      ? parseAmount(form.currentAmount)
+      ? lerCampoMoeda(form.currentAmount)
       : 0;
     const monthlyContribution = form.monthlyContribution.trim()
-      ? parseAmount(form.monthlyContribution)
+      ? lerCampoMoeda(form.monthlyContribution)
       : undefined;
 
     if (!form.name.trim()) {
@@ -252,7 +245,7 @@ export default function InvestimentosPage() {
     setFeedback(null);
     setValidationError(null);
 
-    const amount = parseAmount(contributionAmount);
+    const amount = lerCampoMoeda(contributionAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       setValidationError('Informe um valor de aporte maior que zero.');
       return;

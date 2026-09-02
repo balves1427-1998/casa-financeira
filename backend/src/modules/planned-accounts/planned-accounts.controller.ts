@@ -61,6 +61,25 @@ export class PlannedAccountsController {
     return this.plannedAccountsService.getUpcomingAlerts(user);
   }
 
+  /**
+   * Planejado x Realizado da competência.
+   *
+   * Rota ESTÁTICA declarada antes de `:id` — o Nest casa na ordem, e "summary"
+   * cairia na rota de id, respondendo 404.
+   */
+  @Get('summary/:month/:year')
+  async getPlanejadoRealizado(
+    @GetCurrentUser() user: User,
+    @Param('month') month: string,
+    @Param('year') year: string,
+  ) {
+    return this.plannedAccountsService.getPlanejadoRealizado(
+      user,
+      parseInt(month, 10),
+      parseInt(year, 10),
+    );
+  }
+
   @Get('monthly/:month/:year')
   async getMonthlyPlan(
     @GetCurrentUser() user: User,

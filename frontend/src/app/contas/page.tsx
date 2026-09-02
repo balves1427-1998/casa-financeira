@@ -10,6 +10,7 @@ import {
   toAccountAmount,
 } from '@/types/account';
 import { formatBRL } from '@/utils/format';
+import { lerCampoMoeda, paraCampoMoeda } from '@/utils/money';
 import {
   AlertCircle,
   Building2,
@@ -43,13 +44,6 @@ const emptyForm = (): AccountFormState => ({
   closingDay: '',
   dueDay: '',
 });
-
-/** Converte "3.000,00" ou "3000.00" em número. Aceita negativo. */
-function parseAmount(raw: string): number {
-  const normalized = raw.trim().replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : NaN;
-}
 
 const ICONE_POR_TIPO: Record<string, typeof Wallet> = {
   [AccountType.CHECKING]: Landmark,
@@ -121,11 +115,11 @@ export default function ContasPage() {
       name: account.name || '',
       type: (account.type as AccountType) || AccountType.CHECKING,
       institution: account.institution || '',
-      initialBalance: String(toAccountAmount(account.initialBalance)),
+      initialBalance: paraCampoMoeda(toAccountAmount(account.initialBalance)),
       limit:
         account.limit === undefined || account.limit === null
           ? ''
-          : String(toAccountAmount(account.limit)),
+          : paraCampoMoeda(toAccountAmount(account.limit)),
       closingDay: account.closingDay ? String(account.closingDay) : '',
       dueDay: account.dueDay ? String(account.dueDay) : '',
     });
@@ -149,14 +143,14 @@ export default function ContasPage() {
     }
 
     const saldoInicial = form.initialBalance.trim()
-      ? parseAmount(form.initialBalance)
+      ? lerCampoMoeda(form.initialBalance)
       : 0;
     if (!Number.isFinite(saldoInicial)) {
       setValidationError('Saldo inicial inválido. Ex.: 3000,00');
       return;
     }
 
-    const limite = form.limit.trim() ? parseAmount(form.limit) : undefined;
+    const limite = form.limit.trim() ? lerCampoMoeda(form.limit) : undefined;
     if (limite !== undefined && (!Number.isFinite(limite) || limite < 0)) {
       setValidationError('Limite inválido. Informe um valor igual ou maior que zero.');
       return;

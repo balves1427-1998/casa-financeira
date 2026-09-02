@@ -14,6 +14,7 @@ import {
   CreditCardStatus,
 } from '@/types/credit-card';
 import { formatBRL, formatDateBR } from '@/utils/format';
+import { lerCampoMoeda, paraCampoMoeda } from '@/utils/money';
 
 interface CardFormState {
   name: string;
@@ -46,13 +47,6 @@ const emptyForm = (): CardFormState => ({
   interestRate: '',
   notes: '',
 });
-
-/** Converte "5.000,00" ou "5000.00" em número. */
-function parseAmount(raw: string): number {
-  const normalized = raw.trim().replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : NaN;
-}
 
 /** Data ISO → valor de `<input type="date">`. */
 function toDateInput(value: string | Date | null | undefined): string {
@@ -142,7 +136,7 @@ export default function CreditCardsPage() {
       name: card.name || '',
       bank: card.bank || '',
       cardNumber: card.cardNumber || '',
-      limit: String(card.limit ?? ''),
+      limit: paraCampoMoeda(card.limit),
       closingDay: card.closingDay ? String(card.closingDay) : '',
       dueDay: card.dueDay ? String(card.dueDay) : '',
       status: (card.status as CreditCardStatus) || CreditCardStatus.ACTIVE,
@@ -184,7 +178,7 @@ export default function CreditCardsPage() {
       }
     }
 
-    const limite = parseAmount(form.limit);
+    const limite = lerCampoMoeda(form.limit);
     if (!Number.isFinite(limite) || limite < 0) {
       setValidationError(
         'Limite inválido. Informe um valor igual ou maior que zero. Ex.: 5.000,00',
@@ -206,7 +200,7 @@ export default function CreditCardsPage() {
 
     let juros: number | undefined;
     if (form.interestRate.trim()) {
-      juros = parseAmount(form.interestRate);
+      juros = lerCampoMoeda(form.interestRate);
       if (!Number.isFinite(juros) || juros < 0 || juros > 100) {
         setValidationError(
           'A taxa de juros precisa estar entre 0 e 100 (percentual ao mês). Ex.: 13,99',

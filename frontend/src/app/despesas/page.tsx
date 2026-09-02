@@ -29,6 +29,7 @@ import {
   toExpenseAmount,
 } from '@/types/expense';
 import { formatBRL, formatDateBR, formatPercent } from '@/utils/format';
+import { lerCampoMoeda, paraCampoMoeda } from '@/utils/money';
 import {
   AlertCircle,
   Check,
@@ -105,13 +106,6 @@ const emptyForm = (): ExpenseFormState => ({
   currentInstallment: '',
   observation: '',
 });
-
-/** Converte "1.200,50" ou "1200.50" em número. */
-function parseAmount(raw: string): number {
-  const normalized = raw.trim().replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : NaN;
-}
 
 /** Data ISO (`2026-08-26T00:00:00Z`) → valor de `<input type="date">`. */
 function toDateInput(value: Date | string | null | undefined): string {
@@ -390,7 +384,7 @@ export default function DespesasPage() {
     setForm({
       description: expense.description || '',
       establishment: expense.establishment || '',
-      amount: String(toExpenseAmount(expense.amount)),
+      amount: paraCampoMoeda(toExpenseAmount(expense.amount)),
       date: toDateInput(expense.date),
       category: expense.category || '',
       subcategory: expense.subcategory || '',
@@ -417,7 +411,7 @@ export default function DespesasPage() {
     setFeedback(null);
     setValidationError(null);
 
-    const amount = parseAmount(form.amount);
+    const amount = lerCampoMoeda(form.amount);
     const totalParcelas = form.installments.trim()
       ? Number(form.installments.trim())
       : undefined;
