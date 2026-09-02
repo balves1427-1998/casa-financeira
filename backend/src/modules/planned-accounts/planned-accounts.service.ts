@@ -5,10 +5,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, In } from 'typeorm';
+import { Repository, Between, In, Not } from 'typeorm';
 import { PlannedAccount } from './entities/planned-account.entity';
 import { Expense } from '../expenses/entities/expense.entity';
 import { Income } from '../income/entities/income.entity';
+import { Account } from '../accounts/entities/account.entity';
 import {
   CreatePlannedAccountDto,
   UpdatePlannedAccountDto,
@@ -41,9 +42,26 @@ export class PlannedAccountsService {
     private expenseRepository: Repository<Expense>,
     @InjectRepository(Income)
     private incomeRepository: Repository<Income>,
+    @InjectRepository(Account)
+    private accountRepository: Repository<Account>,
     private familiesService: FamiliesService,
     private recurrenceService: RecurrenceService,
   ) {}
+
+  /**
+   * Primeira conta de pagamento do usuário — a mais antiga.
+   *
+   * Serve de destino quando uma entrada prevista foi cadastrada sem conta.
+   * Cartão de crédito não entra: receita não cai em fatura.
+   */
+  private async contaPadrao(userId: string): Promise<string | null> {
+    const conta = await this.accountRepository.findOne({
+      where: { userId, type: Not('credit_card' as any) },
+      order: { createdAt: 'ASC' },
+    });
+
+    return conta?.id ?? null;
+  }
 
   /**
    * Ids dos usuários cujas contas este usuário pode ler: todos os membros da
@@ -244,15 +262,21 @@ export class PlannedAccountsService {
    * Se o lançamento já tiver sido criado antes (o usuário marcou a despesa como
    * paga pelo outro lado, que propaga para cá), nada é duplicado.
    */
-  async markAsPaid(id: string, user: User): Promise<PlannedAccount> {
+  async markAsPaid(
+    id: string,
+    user: User,
+    dataDoMovimento?: Date,
+  ): Promise<PlannedAccount> {
     const plannedAccount = await this.findOne(id, user);
 
     if (plannedAccount.status === 'paid') {
       return plannedAccount;
     }
 
+    // A data em que o dinheiro se moveu, não a data em que você registrou.
+    // É ela que decide em qual mês o valor conta, no extrato e no realizado.
     plannedAccount.status = 'paid';
-    plannedAccount.paymentDate = new Date();
+    plannedAccount.paymentDate = dataDoMovimento ?? new Date();
 
     const salva = await this.plannedAccountsRepository.save(plannedAccount);
 
@@ -286,20 +310,34 @@ export class PlannedAccountsService {
 
         if (jaExiste) return;
 
-        // `accountId` é obrigatório em receitas. Sem conta de destino definida
-        // não dá para inventar uma: o registro fica pendente e o log avisa.
-        if (!conta.accountId) {
+        // `accountId` é obrigatório em receitas. Quando a entrada prevista foi
+        // cadastrada sem conta de destino, a versão anterior desistia em
+        // silêncio: o usuário clicava em confirmar, o card virava "recebido" e
+        // NADA era somado às receitas — sem nenhum aviso na tela. Agora cai na
+        // primeira conta de pagamento da pessoa, que é o palpite óbvio para
+        // quem tem uma conta só, e o log registra a escolha.
+        const contaDeDestino =
+          conta.accountId ?? (await this.contaPadrao(conta.userId));
+
+        if (!contaDeDestino) {
           this.logger.warn(
-            `Conta planejada ${conta.id} confirmada sem conta de destino; ` +
-              'a receita não pôde ser registrada automaticamente.',
+            `Conta planejada ${conta.id} confirmada, mas o usuário não tem ` +
+              'nenhuma conta de pagamento cadastrada; a receita não pôde ser ' +
+              'registrada.',
           );
           return;
+        }
+
+        if (!conta.accountId) {
+          this.logger.log(
+            `Entrada ${conta.id} não tinha conta de destino; registrada em ${contaDeDestino}.`,
+          );
         }
 
         await this.incomeRepository.save(
           this.incomeRepository.create({
             userId: conta.userId,
-            accountId: conta.accountId,
+            accountId: contaDeDestino,
             description: conta.description,
             type: conta.category || 'other',
             amount: conta.amount,

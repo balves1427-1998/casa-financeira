@@ -54,6 +54,15 @@ function normalizeAccount(raw: any): Account {
 export const useAccounts = () => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [totalBalance, setTotalBalance] = useState(0);
+  /**
+   * De onde vem o saldo: quanto foi cadastrado, quanto os lançamentos moveram
+   * e quanto se moveu sem apontar para conta nenhuma.
+   */
+  const [saldoDetalhado, setSaldoDetalhado] = useState({
+    saldoInicial: 0,
+    movimento: 0,
+    semConta: 0,
+  });
   const [isLoading, setIsLoading] = useState(false);
   /** `true` durante criação, edição ou exclusão — separado da carga da lista. */
   const [isSaving, setIsSaving] = useState(false);
@@ -82,6 +91,11 @@ export const useAccounts = () => {
     try {
       const data = await apiClient.getTotalBalance();
       setTotalBalance(toAccountAmount(data?.totalBalance));
+      setSaldoDetalhado({
+        saldoInicial: toAccountAmount(data?.saldoInicial),
+        movimento: toAccountAmount(data?.movimento),
+        semConta: toAccountAmount(data?.semConta),
+      });
     } catch (err) {
       console.error('Error fetching total balance:', err);
     }
@@ -178,6 +192,7 @@ export const useAccounts = () => {
   return {
     accounts,
     totalBalance,
+    saldoDetalhado,
     isLoading,
     isSaving,
     error,

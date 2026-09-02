@@ -10,6 +10,14 @@ const MESES = [
   'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
 ];
 
+/** Hoje em `YYYY-MM-DD`, no fuso local — `toISOString()` volta um dia à noite. */
+function hojeISO(): string {
+  const d = new Date();
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  const dia = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mes}-${dia}`;
+}
+
 /**
  * O que precisa ser pago neste mês, e com quanto se conta para pagar.
  *
@@ -25,6 +33,8 @@ export function ContasDoMes() {
   const { accounts } = useAccounts();
   const { planned, markAsPaid, isSaving } = usePlannedAccounts();
   const [pagando, setPagando] = useState<string | null>(null);
+  const [confirmando, setConfirmando] = useState<string | null>(null);
+  const [dataDoPagamento, setDataDoPagamento] = useState(hojeISO());
 
   const hoje = new Date();
   const mes = hoje.getMonth();
@@ -77,13 +87,26 @@ export function ContasDoMes() {
   // está por receber. É o número que decide se dá para comprar alguma coisa.
   const sobra = saldoEmCaixa + aReceber - totalAPagar;
 
-  const marcarPaga = async (id: string) => {
+  /**
+   * Confirma o pagamento na data em que o dinheiro saiu.
+   *
+   * A data é perguntada, e não assumida como hoje: quase nunca se registra no
+   * mesmo dia, e gravar "hoje" joga a saída para a competência errada — no
+   * virar do mês, para o mês errado.
+   */
+  const marcarPaga = async (id: string, data: string) => {
     setPagando(id);
     try {
-      await markAsPaid(id);
+      await markAsPaid(id, data || undefined);
+      setConfirmando(null);
     } finally {
       setPagando(null);
     }
+  };
+
+  const abrirConfirmacao = (id: string) => {
+    setConfirmando(id);
+    setDataDoPagamento(hojeISO());
   };
 
   const diasAte = (data: string | Date) => {
@@ -194,13 +217,38 @@ export function ContasDoMes() {
                   >
                     {formatBRL(Number(conta.amount))}
                   </span>
-                  <button
-                    onClick={() => marcarPaga(conta.id)}
-                    disabled={isSaving || pagando === conta.id}
-                    className="rounded bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
-                  >
-                    {pagando === conta.id ? 'Pagando…' : 'Marcar paga'}
-                  </button>
+                  {confirmando === conta.id ? (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="date"
+                        aria-label="Data do pagamento"
+                        value={dataDoPagamento}
+                        onChange={e => setDataDoPagamento(e.target.value)}
+                        className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1.5 py-1 text-xs text-gray-900 dark:text-white"
+                      />
+                      <button
+                        onClick={() => marcarPaga(conta.id, dataDoPagamento)}
+                        disabled={isSaving || !dataDoPagamento}
+                        className="rounded bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                      >
+                        {pagando === conta.id ? 'Pagando…' : 'Confirmar'}
+                      </button>
+                      <button
+                        onClick={() => setConfirmando(null)}
+                        className="rounded border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs text-gray-700 dark:text-gray-300"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => abrirConfirmacao(conta.id)}
+                      disabled={isSaving}
+                      className="rounded bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                    >
+                      Marcar paga
+                    </button>
+                  )}
                 </div>
               </li>
             );

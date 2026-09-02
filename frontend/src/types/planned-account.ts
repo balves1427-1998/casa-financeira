@@ -31,6 +31,26 @@ export const PLANNED_STATUS_OPTIONS: Array<{
   label: PLANNED_STATUS_LABELS[value],
 }));
 
+/**
+ * O mesmo status, dito na língua de uma ENTRADA.
+ *
+ * No banco entrada e saída compartilham o status `paid` — e o Planejado
+ * mostrava "Pago" e um botão "Pagar" em cima do salário, que é o oposto do que
+ * acontece. O status não muda; muda a palavra.
+ */
+export const PLANNED_STATUS_LABELS_INCOME: Record<string, string> = {
+  ...PLANNED_STATUS_LABELS,
+  [PlannedAccountStatus.PAID]: 'Recebido',
+  [PlannedAccountStatus.OVERDUE]: 'Atrasado',
+};
+
+/** Rótulo do status conforme o tipo do compromisso. */
+export function rotuloDeStatus(status: string, tipo?: string): string {
+  const mapa =
+    tipo === 'income' ? PLANNED_STATUS_LABELS_INCOME : PLANNED_STATUS_LABELS;
+  return mapa[status] || status;
+}
+
 /** Periodicidade de uma conta recorrente (`enum RecurrenceFrequency`). */
 export enum PlannedFrequency {
   DAILY = 'daily',

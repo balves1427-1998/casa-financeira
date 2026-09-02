@@ -57,6 +57,7 @@ export default function ContasPage() {
   const {
     accounts,
     totalBalance,
+    saldoDetalhado,
     isLoading,
     isSaving,
     error,
@@ -179,13 +180,15 @@ export default function ContasPage() {
      * partir do saldo inicial e dos lançamentos. O `CreateAccountDto` não tem
      * esse campo e, com `forbidNonWhitelisted`, enviá-lo devolve 400.
      *
-     * `initialBalance` também só existe na criação — o `UpdateAccountDto` não
-     * o aceita, por isso o campo fica bloqueado na edição.
+     * `initialBalance`, ao contrário, é editável: é o dinheiro que havia na
+     * conta ANTES do primeiro lançamento, e é a única parte do saldo que a
+     * pessoa informa.
      */
     const base: Record<string, unknown> = {
       name: form.name.trim(),
       type: form.type,
       institution: form.institution.trim(),
+      initialBalance: Number(saldoInicial.toFixed(2)),
     };
 
     if (limite !== undefined) base.limit = Number(limite.toFixed(2));
@@ -202,10 +205,7 @@ export default function ContasPage() {
         await updateAccount(editingId, base);
         setFeedback('Conta atualizada com sucesso.');
       } else {
-        await createAccount({
-          ...base,
-          initialBalance: Number(saldoInicial.toFixed(2)),
-        });
+        await createAccount(base);
         setFeedback('Conta cadastrada com sucesso.');
       }
       resetForm();
@@ -340,8 +340,16 @@ export default function ContasPage() {
               {formatBRL(totalBalance)}
             </p>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Somado pelo servidor, incluindo todas as contas cadastradas
+              {formatBRL(saldoDetalhado.saldoInicial)} cadastrado{' '}
+              {saldoDetalhado.movimento < 0 ? '−' : '+'}{' '}
+              {formatBRL(Math.abs(saldoDetalhado.movimento))} dos lançamentos
             </p>
+            {saldoDetalhado.semConta !== 0 && (
+              <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                ⚠️ {formatBRL(Math.abs(saldoDetalhado.semConta))} em lançamentos
+                sem conta definida: entram neste total, mas em conta nenhuma.
+              </p>
+            )}
           </div>
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
@@ -479,14 +487,13 @@ export default function ContasPage() {
                   onChange={event =>
                     setForm({ ...form, initialBalance: event.target.value })
                   }
-                  disabled={Boolean(editingId)}
                   placeholder="3000,00"
                   className={inputClass}
                 />
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  {editingId
-                    ? 'O saldo inicial só pode ser definido na criação da conta — o saldo atual é calculado pelo servidor a partir dos lançamentos.'
-                    : 'Ponto de partida do saldo. Depois disso o saldo passa a ser calculado pelos lançamentos.'}
+                  Quanto havia na conta ANTES do primeiro lançamento
+                  registrado — não o saldo de hoje. O saldo atual é calculado a
+                  partir daqui somando receitas e descontando despesas pagas.
                 </p>
               </div>
 

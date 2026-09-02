@@ -52,6 +52,20 @@ export class UpdateAccountDto {
   @IsString()
   name?: string;
 
+  /**
+   * Saldo inicial — o dinheiro que havia na conta ANTES do primeiro lançamento.
+   *
+   * Passou a ser editável junto com a mudança que derivou o saldo dos
+   * lançamentos. Enquanto `balance` era só o número do cadastro, corrigi-lo
+   * seria corrigir o saldo direto, o que não deveria ser possível. Agora é o
+   * contrário: o saldo é calculado, e este campo é a única parte dele que a
+   * pessoa informa — quem digitou aqui o saldo de HOJE, e não o de antes dos
+   * lançamentos, não tinha como consertar sem apagar e recadastrar a conta.
+   */
+  @IsOptional()
+  @IsNumber()
+  initialBalance?: number;
+
   @IsOptional()
   @IsEnum(AccountType)
   type?: AccountType;

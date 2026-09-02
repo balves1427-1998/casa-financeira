@@ -9,12 +9,16 @@ import { PlannedAccount } from '../planned-accounts/entities/planned-account.ent
 import { CreditCard } from '../credit-cards/entities/credit-card.entity';
 import { Account } from '../accounts/entities/account.entity';
 import { FamiliesModule } from '../families/families.module';
+import { SaldoModule } from '../saldo/saldo.module';
 
 @Module({
   imports: [
     // O fluxo de caixa é da CASA: precisa dos membros da família para somar
     // os lançamentos de todos.
     FamiliesModule,
+    // O saldo de abertura e o de hoje saem daqui — os mesmos números que a aba
+    // Contas e o painel de Despesas mostram.
+    SaldoModule,
     TypeOrmModule.forFeature([
       CashFlowSnapshot,
       Expense,

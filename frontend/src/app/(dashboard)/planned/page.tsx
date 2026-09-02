@@ -20,13 +20,24 @@ import {
   PLANNED_STATUS_OPTIONS,
   PlannedAccountStatus,
   PlannedFrequency,
+  rotuloDeStatus,
 } from '@/types/planned-account';
 import { formatBRL, formatDateBR } from '@/utils/format';
 import { lerCampoMoeda, paraCampoMoeda } from '@/utils/money';
 import { PlanejadoRealizado } from '@/components/PlanejadoRealizado';
 import { ProjecaoFutura } from '@/components/ProjecaoFutura';
 
+/** Hoje em `YYYY-MM-DD`, no fuso local — `toISOString()` volta um dia à noite. */
+function hojeISO(): string {
+  const d = new Date();
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  const dia = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mes}-${dia}`;
+}
+
 interface PlannedFormState {
+  /** Entrada ou saída — o Planejado guarda os dois. */
+  tipo: 'expense' | 'income';
   description: string;
   category: string;
   amount: string;
@@ -44,6 +55,7 @@ interface PlannedFormState {
 const hoje = () => new Date().toISOString().slice(0, 10);
 
 const emptyForm = (): PlannedFormState => ({
+  tipo: 'expense',
   description: '',
   category: '',
   amount: '',
@@ -95,6 +107,11 @@ export default function PlannedPage() {
   const [confirmingDeletionId, setConfirmingDeletionId] = useState<string | null>(
     null,
   );
+
+  // Confirmação de pagamento/recebimento: qual card está aberto e em que data
+  // o dinheiro se moveu.
+  const [confirmandoId, setConfirmandoId] = useState<string | null>(null);
+  const [dataDoMovimento, setDataDoMovimento] = useState(hojeISO());
 
   /** Contas comuns: o cartão de crédito tem seu próprio seletor. */
   const contasDePagamento = useMemo(
@@ -213,6 +230,7 @@ export default function PlannedPage() {
   const handleEdit = (account: PlannedAccount) => {
     setEditingId(account.id);
     setForm({
+      tipo: account.type === 'income' ? 'income' : 'expense',
       description: account.description || '',
       category: account.category || '',
       amount: paraCampoMoeda(account.amount),
@@ -277,6 +295,9 @@ export default function PlannedPage() {
     };
 
     if (!editingId) {
+      // Sem isto, TODO compromisso criado à mão virava despesa: o DTO do
+      // backend não declarava `type` e o `whitelist` descartava o campo.
+      payload.type = form.tipo;
       payload.responsible = form.responsible;
       payload.isRecurring = form.isRecurring;
       if (form.isRecurring) payload.frequency = form.frequency;
@@ -319,14 +340,37 @@ export default function PlannedPage() {
     }
   };
 
-  const handleMarkAsPaid = async (id: string) => {
+  /**
+   * Confirma um compromisso na data em que o dinheiro se moveu.
+   *
+   * A data é perguntada, e não assumida como hoje, porque quase nunca se
+   * registra no dia: o salário caiu no dia 5, você marca no dia 12, e gravar
+   * "hoje" jogaria a entrada para a competência errada — no virar do mês, para
+   * o mês errado.
+   */
+  const handleMarkAsPaid = async (
+    conta: { id: string; type?: string },
+    data: string,
+  ) => {
     setFeedback(null);
+    const entrada = conta.type === 'income';
+
     try {
-      await markAsPaid(id);
-      setFeedback('Conta marcada como paga.');
+      await markAsPaid(conta.id, data || undefined);
+      setConfirmandoId(null);
+      setFeedback(
+        entrada
+          ? 'Entrada confirmada — já está somando nas receitas.'
+          : 'Conta confirmada — já está somando nas despesas pagas.',
+      );
     } catch {
       // A mensagem real do backend já é exibida pelo estado do hook
     }
+  };
+
+  const abrirConfirmacao = (id: string) => {
+    setConfirmandoId(id);
+    setDataDoMovimento(hojeISO());
   };
 
   const inputClass =
@@ -521,6 +565,36 @@ export default function PlannedPage() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {!editingId && (
+              <div>
+                <span className={labelClass}>É uma saída ou uma entrada?</span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, tipo: 'expense' })}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                      form.tipo === 'expense'
+                        ? 'border-red-500 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300'
+                        : 'border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    ↑ Conta a pagar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, tipo: 'income' })}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                      form.tipo === 'income'
+                        ? 'border-green-500 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-300'
+                        : 'border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    ↓ Valor a receber
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="planned-description" className={labelClass}>
@@ -847,7 +921,7 @@ export default function PlannedPage() {
                           account.status,
                         )}`}
                       >
-                        {PLANNED_STATUS_LABELS[account.status] || account.status}
+                        {rotuloDeStatus(account.status, account.type)}
                       </span>
 
                       <span className="px-3 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
@@ -898,15 +972,56 @@ export default function PlannedPage() {
                       {formatDateBR(account.dueDate)}
                     </p>
 
+                    {confirmandoId === account.id && (
+                      <div className="mb-3 rounded-lg border border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950/30 p-3 text-left">
+                        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          {account.type === 'income'
+                            ? 'Em que dia o dinheiro entrou?'
+                            : 'Em que dia o pagamento saiu?'}
+                        </label>
+                        <input
+                          type="date"
+                          value={dataDoMovimento}
+                          onChange={e => setDataDoMovimento(e.target.value)}
+                          className="w-full px-2 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                        />
+                        <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                          É esta data que decide em qual mês o valor conta.
+                        </p>
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            onClick={() =>
+                              handleMarkAsPaid(account, dataDoMovimento)
+                            }
+                            disabled={isSaving || !dataDoMovimento}
+                            className="px-3 py-1 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded transition-colors"
+                          >
+                            {isSaving
+                              ? 'Confirmando…'
+                              : account.type === 'income'
+                                ? 'Confirmar recebimento'
+                                : 'Confirmar pagamento'}
+                          </button>
+                          <button
+                            onClick={() => setConfirmandoId(null)}
+                            className="px-3 py-1 text-sm font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex flex-wrap gap-2 justify-end">
                       {account.status !== 'paid' &&
-                        account.status !== 'cancelled' && (
+                        account.status !== 'cancelled' &&
+                        confirmandoId !== account.id && (
                           <button
-                            onClick={() => handleMarkAsPaid(account.id)}
+                            onClick={() => abrirConfirmacao(account.id)}
                             disabled={isSaving}
                             className="px-3 py-1 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded transition-colors"
                           >
-                            ✓ Pagar
+                            {account.type === 'income' ? '✓ Receber' : '✓ Pagar'}
                           </button>
                         )}
                       <button

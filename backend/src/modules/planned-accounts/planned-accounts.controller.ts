@@ -17,6 +17,7 @@ import { GetCurrentUser } from '../../common/decorators/get-current-user.decorat
 import { User } from '../users/entities/user.entity';
 import { PlannedAccountsService } from './planned-accounts.service';
 import {
+  ConfirmarPlanejadoDto,
   CreatePlannedAccountDto,
   UpdatePlannedAccountDto,
 } from './dtos/create-planned-account.dto';
@@ -125,13 +126,21 @@ export class PlannedAccountsController {
     return this.plannedAccountsService.update(id, user, updatePlannedAccountDto);
   }
 
+  /**
+   * Confirma o compromisso: pago, se for saída; recebido, se for entrada.
+   *
+   * O corpo é opcional e aceita a data em que o dinheiro de fato se moveu.
+   * Sem ela, vale hoje — que era o comportamento antigo, mantido para não
+   * quebrar quem chama sem corpo nenhum.
+   */
   @Patch(':id/mark-as-paid')
   @HttpCode(HttpStatus.OK)
   async markAsPaid(
     @Param('id') id: string,
     @GetCurrentUser() user: User,
+    @Body() body?: ConfirmarPlanejadoDto,
   ) {
-    return this.plannedAccountsService.markAsPaid(id, user);
+    return this.plannedAccountsService.markAsPaid(id, user, body?.paymentDate);
   }
 
   @Delete(':id')

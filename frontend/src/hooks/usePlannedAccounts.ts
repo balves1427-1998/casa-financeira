@@ -216,20 +216,29 @@ export const usePlannedAccounts = () => {
     [],
   );
 
-  // Mark as paid
-  const markAsPaid = useCallback(async (id: string) => {
+  /**
+   * Confirma o compromisso: pago, se for saída; recebido, se for entrada.
+   *
+   * `paymentDate` é a data em que o dinheiro se moveu — não a de hoje. É ela
+   * que decide em que mês o valor conta no extrato e no Planejado × Realizado.
+   * Omitida, o backend usa hoje.
+   */
+  const markAsPaid = useCallback(async (id: string, paymentDate?: string) => {
     try {
       setIsSaving(true);
       setError(null);
       const updated = normalizePlanned(
-        await apiClient.patch(`/planned-accounts/${id}/mark-as-paid`, {}),
+        await apiClient.patch(
+          `/planned-accounts/${id}/mark-as-paid`,
+          paymentDate ? { paymentDate } : {},
+        ),
       );
       setPlanned(prev => prev.map(p => (p.id === id ? updated : p)));
       return updated;
     } catch (err) {
       const errorMessage = getApiErrorMessage(
         err,
-        'Erro ao marcar a conta como paga',
+        'Erro ao confirmar o compromisso',
       );
       setError(errorMessage);
       throw new Error(errorMessage);

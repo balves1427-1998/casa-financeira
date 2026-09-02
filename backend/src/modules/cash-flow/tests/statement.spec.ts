@@ -24,18 +24,14 @@ describe('CashFlowService — extrato', () => {
       { find: async () => dados.receitas ?? [] } as any,
       { find: async () => dados.planejadas ?? [] } as any,
       {} as any, // cartões
-      {
-        createQueryBuilder: () => ({
-          where: () => ({
-            andWhere: () => ({
-              select: () => ({
-                getRawOne: async () => ({ total: String(dados.saldo ?? 0) }),
-              }),
-            }),
-          }),
-        }),
-      } as any,
+      {} as any, // contas
       { getMemberIds: async () => ['user-1'] } as any,
+      // O saldo de abertura passou a vir do SaldoService, derivado do que
+      // aconteceu antes do mês — e não mais da coluna `accounts.balance`.
+      {
+        getSaldoTotal: async () => dados.saldo ?? 0,
+        getSaldoDeAbertura: async () => dados.saldo ?? 0,
+      } as any,
     );
 
     return service;

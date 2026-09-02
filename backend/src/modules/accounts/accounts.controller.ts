@@ -64,7 +64,16 @@ export class AccountsController {
 
   @Get('balance/total')
   async getTotalBalance(@GetCurrentUser() user: User) {
-    const balance = await this.accountsService.getTotalBalance(user);
-    return { totalBalance: balance };
+    const detalhe = await this.accountsService.getBalanceBreakdown(user);
+
+    return {
+      totalBalance: detalhe.saldo,
+      // Aberto para a tela poder explicar de onde veio o número — e denunciar
+      // lançamentos sem conta definida, que entram no total mas em conta
+      // nenhuma.
+      saldoInicial: detalhe.saldoInicial,
+      movimento: detalhe.movimento,
+      semConta: detalhe.semConta,
+    };
   }
 }

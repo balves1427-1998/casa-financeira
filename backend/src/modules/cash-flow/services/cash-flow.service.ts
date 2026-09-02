@@ -9,6 +9,7 @@ import { PlannedAccount } from '../../../modules/planned-accounts/entities/plann
 import { CreditCard } from '../../../modules/credit-cards/entities/credit-card.entity';
 import { Account } from '../../../modules/accounts/entities/account.entity';
 import { FamiliesService } from '../../../modules/families/families.service';
+import { SaldoService } from '../../../modules/saldo/saldo.service';
 import {
   CashFlowDayDto,
   CashFlowMonthDto,
@@ -34,6 +35,7 @@ export class CashFlowService {
     @InjectRepository(Account)
     private accountRepository: Repository<Account>,
     private familiesService: FamiliesService,
+    private readonly saldoService: SaldoService,
   ) {}
 
   /**
@@ -200,7 +202,7 @@ export class CashFlowService {
         transactionCount: dayExpenses.length + dayIncomes.length + dayPlanned.length,
         isCriticalDay,
         criticalDayReason: isCriticalDay
-          ? `R$ ${totalPayments.toFixed(2)} em pagamentos`
+          ? `${emReais(totalPayments)} em pagamentos`
           : undefined,
       };
 
@@ -209,7 +211,7 @@ export class CashFlowService {
       if (isCriticalDay) {
         criticalDays.push({
           date: currentDate,
-          reason: `R$ ${totalPayments.toFixed(2)} em pagamentos`,
+          reason: `${emReais(totalPayments)} em pagamentos`,
           totalPayments,
         });
       }
@@ -455,42 +457,28 @@ export class CashFlowService {
   }
 
   /**
-   * Helper: Get current balance from all accounts
+   * Saldo em caixa hoje — derivado dos lançamentos.
+   *
+   * Já devolveu o valor fixo 5000; depois passou a somar `accounts.balance`.
+   * As duas versões erravam pelo mesmo motivo: o número não vinha do que
+   * aconteceu. Nada no sistema jamais escreveu nessa coluna, então ela era o
+   * saldo digitado no cadastro da conta, parado desde então.
    */
   private async getCurrentBalance(user: User): Promise<number> {
-    // Antes devolvia o valor fixo 5000, o que fazia todo o fluxo de caixa e o
-    // "melhor dia para compras" serem calculados sobre um saldo inventado.
-    // Cartões de crédito ficam de fora: o saldo deles é dívida, não disponível.
-    const result = await this.accountRepository
-      .createQueryBuilder('account')
-      .where('account.userId = :userId', { userId: user.id })
-      .andWhere('account.type != :creditCard', { creditCard: 'credit_card' })
-      .select('SUM(account.balance)', 'total')
-      .getRawOne<{ total: string | null }>();
-
-    return Number(result?.total ?? 0) || 0;
+    return this.saldoService.getSaldoTotal(user);
   }
 
   /**
-   * Helper: Get opening balance for a month
+   * Saldo de abertura do mês: o fechamento da véspera.
+   *
+   * A versão anterior procurava um snapshot do último dia do mês anterior e,
+   * não achando, devolvia o saldo de HOJE. Como nenhum código do sistema jamais
+   * gravou um snapshot, o primeiro ramo nunca executava — e todo mês, passado
+   * ou futuro, abria com o mesmo número. Agora a abertura é calculada, e cada
+   * mês abre onde o anterior fechou.
    */
   private async getOpeningBalance(user: User, monthStart: Date): Promise<number> {
-    // Try to get from previous month's snapshot
-    const previousDay = new Date(monthStart.getTime() - 24 * 60 * 60 * 1000);
-
-    const snapshot = await this.snapshotRepository.findOne({
-      where: {
-        userId: user.id,
-        snapshotDate: previousDay,
-      },
-    });
-
-    if (snapshot) {
-      return snapshot.closingBalance;
-    }
-
-    // Otherwise get current account balance
-    return this.getCurrentBalance(user);
+    return this.saldoService.getSaldoDeAbertura(user, monthStart);
   }
 
   /**
@@ -657,4 +645,27 @@ export class CashFlowService {
       movimentos,
     };
   }
+}
+
+/**
+ * Valor em real brasileiro: `R$ 1.000,00`.
+ *
+ * `toFixed(2)` escrevia `R$ 1000.00` — ponto decimal e sem separador de
+ * milhar. O texto ia inteiro para a tela dos dias críticos, ao lado dos
+ * mesmos valores já formatados em pt-BR, e a diferença saltava aos olhos.
+ */
+function emReais(valor: number): string {
+  return (
+    valor
+      .toLocaleString('pt-BR', {
+        style: 'currency',
+        currency: 'BRL',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+      // O `Intl` separa "R$" do número com espaço NÃO separável (U+00A0).
+      // Numa página ele é invisível, mas este texto também vai para e-mail e
+      // relatório, onde vira "R$Â 1.000,00" na primeira codificação errada.
+      .replace(/\u00a0/g, ' ')
+  );
 }
