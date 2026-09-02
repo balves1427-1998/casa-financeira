@@ -24,6 +24,7 @@ import {
 import { formatBRL, formatDateBR } from '@/utils/format';
 import { lerCampoMoeda, paraCampoMoeda } from '@/utils/money';
 import { PlanejadoRealizado } from '@/components/PlanejadoRealizado';
+import { ProjecaoFutura } from '@/components/ProjecaoFutura';
 
 interface PlannedFormState {
   description: string;
@@ -365,6 +366,10 @@ export default function PlannedPage() {
 
       {/* Execução do orçamento no mês, antes da lista de contas. */}
       <PlanejadoRealizado />
+
+      {/* Projeção, dias críticos e melhor dia — vieram do Fluxo de Caixa, que
+          passou a ser extrato. Futuro mora aqui. */}
+      <ProjecaoFutura />
 
       {/* Erro da API */}
       {error && (

@@ -709,6 +709,12 @@ class ApiClient {
     return response.data;
   }
 
+  /** EXTRATO da competência: o que entrou e saiu de verdade. */
+  async getStatement(mes: number, ano: number) {
+    const response = await this.client.get(`/cash-flow/statement/${mes}/${ano}`);
+    return response.data;
+  }
+
   /** Planejado x Realizado de uma competência. */
   async getPlanejadoRealizado(mes: number, ano: number) {
     const response = await this.client.get(

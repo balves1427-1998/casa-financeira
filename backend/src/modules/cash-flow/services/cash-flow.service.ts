@@ -492,4 +492,169 @@ export class CashFlowService {
     // Otherwise get current account balance
     return this.getCurrentBalance(user);
   }
+
+  /**
+   * EXTRATO da competência: o que de fato entrou e saiu da conta.
+   *
+   * Isto NÃO é projeção. A diferença é a razão de a tela existir:
+   *
+   *  - o Planejado responde "o que vem pela frente";
+   *  - o extrato responde "onde eu estou agora".
+   *
+   * Misturar as duas coisas numa tela só foi o que tornou o saldo do Fluxo de
+   * Caixa difícil de conferir: ele nunca batia com o saldo do banco, porque
+   * carregava compromissos que ainda não aconteceram.
+   *
+   * O QUE ENTRA AQUI, e a regra é uma só — dinheiro que MOVEU a conta:
+   *  - receitas lançadas;
+   *  - despesas pagas fora do cartão;
+   *  - faturas de cartão MARCADAS COMO PAGAS, na data do pagamento.
+   *
+   * O que NÃO entra: compras no cartão. Elas foram gastas, mas o dinheiro
+   * continua na conta até a fatura ser paga — e é a fatura que aparece. Somar
+   * as duas mostraria o mesmo dinheiro saindo duas vezes, e o saldo do topo
+   * deixaria de bater com o extrato do banco.
+   */
+  async getStatement(
+    user: User,
+    month: number,
+    year: number,
+  ): Promise<{
+    month: number;
+    year: number;
+    openingBalance: number;
+    saldoAteHoje: number;
+    closingBalance: number;
+    totalEntradas: number;
+    totalSaidas: number;
+    movimentos: Array<{
+      date: Date;
+      tipo: 'entrada' | 'saida';
+      descricao: string;
+      categoria?: string;
+      responsavel?: string;
+      valor: number;
+      origem: 'receita' | 'despesa' | 'fatura';
+      saldoApos: number;
+    }>;
+  }> {
+    if (month < 1 || month > 12 || year < 2000 || year > 2100) {
+      throw new BadRequestException('Mês ou ano inválido');
+    }
+
+    const userIds = await this.scopeUserIds(user);
+    const inicio = new Date(year, month - 1, 1);
+    const fim = new Date(year, month, 0, 23, 59, 59);
+
+    const [despesas, receitas, planejadas] = await Promise.all([
+      this.expenseRepository.find({
+        where: { userId: In(userIds), date: Between(inicio, fim) },
+      }),
+      this.incomeRepository.find({
+        where: { userId: In(userIds), date: Between(inicio, fim) },
+      }),
+      this.plannedAccountRepository.find({
+        where: { userId: In(userIds), status: 'paid' },
+      }),
+    ]);
+
+    const movimentos: Array<{
+      date: Date;
+      tipo: 'entrada' | 'saida';
+      descricao: string;
+      categoria?: string;
+      responsavel?: string;
+      valor: number;
+      origem: 'receita' | 'despesa' | 'fatura';
+      saldoApos: number;
+    }> = [];
+
+    for (const r of receitas) {
+      movimentos.push({
+        date: r.date,
+        tipo: 'entrada',
+        descricao: r.description,
+        categoria: (r as any).type,
+        responsavel: r.responsible,
+        valor: Number(r.amount),
+        origem: 'receita',
+        saldoApos: 0,
+      });
+    }
+
+    for (const d of despesas) {
+      // Compra no cartão não moveu a conta. Quem move é a fatura.
+      if (d.paymentMethod === 'credit' && d.creditCardId) continue;
+
+      movimentos.push({
+        date: d.date,
+        tipo: 'saida',
+        descricao: d.description,
+        categoria: d.category,
+        responsavel: d.responsible,
+        valor: Number(d.amount),
+        origem: 'despesa',
+        saldoApos: 0,
+      });
+    }
+
+    // Faturas pagas entram pela DATA DO PAGAMENTO, não pela do vencimento:
+    // pagar adiantado ou em atraso muda o dia em que o dinheiro saiu.
+    for (const p of planejadas) {
+      // A consulta já filtra por `paid`, mas a regra é crítica demais para
+      // depender só disso: uma fatura ainda não paga no extrato mostraria
+      // dinheiro saindo que continua na conta.
+      if (p.status !== 'paid') continue;
+      if (!p.invoiceCompetencia || !p.creditCardId) continue;
+
+      const quando = p.paymentDate ?? p.dueDate;
+      if (quando < inicio || quando > fim) continue;
+
+      movimentos.push({
+        date: quando,
+        tipo: 'saida',
+        descricao: p.description,
+        categoria: p.category ?? 'Cartão de crédito',
+        responsavel: p.responsible,
+        valor: Number(p.amount),
+        origem: 'fatura',
+        saldoApos: 0,
+      });
+    }
+
+    movimentos.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    const openingBalance = await this.getOpeningBalance(user, inicio);
+
+    const hoje = new Date();
+    hoje.setHours(23, 59, 59, 999);
+
+    let saldo = openingBalance;
+    let saldoAteHoje = openingBalance;
+    let totalEntradas = 0;
+    let totalSaidas = 0;
+
+    for (const m of movimentos) {
+      saldo += m.tipo === 'entrada' ? m.valor : -m.valor;
+      m.saldoApos = Number(saldo.toFixed(2));
+
+      if (m.tipo === 'entrada') totalEntradas += m.valor;
+      else totalSaidas += m.valor;
+
+      // O saldo do topo é o de HOJE: num mês futuro ele é o de abertura, num
+      // mês passado é o de fechamento, e no mês corrente para no dia de hoje.
+      if (m.date <= hoje) saldoAteHoje = saldo;
+    }
+
+    return {
+      month,
+      year,
+      openingBalance: Number(openingBalance.toFixed(2)),
+      saldoAteHoje: Number(saldoAteHoje.toFixed(2)),
+      closingBalance: Number(saldo.toFixed(2)),
+      totalEntradas: Number(totalEntradas.toFixed(2)),
+      totalSaidas: Number(totalSaidas.toFixed(2)),
+      movimentos,
+    };
+  }
 }

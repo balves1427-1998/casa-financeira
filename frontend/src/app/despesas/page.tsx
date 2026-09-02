@@ -30,6 +30,7 @@ import {
 } from '@/types/expense';
 import { formatBRL, formatDateBR, formatPercent } from '@/utils/format';
 import { lerCampoMoeda, paraCampoMoeda } from '@/utils/money';
+import { ContasDoMes } from '@/components/ContasDoMes';
 import {
   AlertCircle,
   Check,
@@ -562,6 +563,9 @@ export default function DespesasPage() {
           </Link>
         </div>
       </div>
+
+      {/* Visão do mês: o que pagar e com quanto se conta. */}
+      <ContasDoMes />
 
       {/* Erro da API */}
       {error && (

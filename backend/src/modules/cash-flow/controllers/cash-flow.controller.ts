@@ -43,6 +43,22 @@ export class CashFlowController {
   }
 
   /**
+   * EXTRATO da competência: o que entrou e saiu de verdade.
+   *
+   * Estática também, e pelo mesmo motivo do comentário acima: `:month/:year`
+   * capturaria "statement" e o ParseIntPipe devolveria 400.
+   */
+  @Get('statement/:month/:year')
+  @HttpCode(HttpStatus.OK)
+  async getStatement(
+    @CurrentUser() user: User,
+    @Param('month', ParseIntPipe) month: number,
+    @Param('year', ParseIntPipe) year: number,
+  ) {
+    return this.cashFlowService.getStatement(user, month, year);
+  }
+
+  /**
    * Get cash flow for a specific month
    * @param user - Current authenticated user
    * @param month - Month number (1-12)
