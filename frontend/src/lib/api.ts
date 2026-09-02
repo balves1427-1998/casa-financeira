@@ -687,11 +687,25 @@ class ApiClient {
     return response.data;
   }
 
-  /** Confirma a importação, gravando os lançamentos escolhidos. */
-  async confirmPdfImport(id: string, selectedTransactionIds?: string[]) {
-    const response = await this.client.put(`/pdf-import/${id}/confirm`, {
-      selectedTransactionIds,
-    });
+  /**
+   * Confirma a importação, gravando os lançamentos conferidos.
+   *
+   * `ajustes` leva as categorias trocadas na tela de conferência: o palpite
+   * automático acerta a maioria, mas quem decide é quem fez a compra.
+   */
+  async confirmPdfImport(
+    id: string,
+    opcoes: {
+      selectedTransactionIds?: string[];
+      ajustes?: Array<{
+        transactionId: string;
+        category?: string;
+        responsible?: string;
+      }>;
+      responsible?: string;
+    } = {},
+  ) {
+    const response = await this.client.put(`/pdf-import/${id}/confirm`, opcoes);
     return response.data;
   }
 

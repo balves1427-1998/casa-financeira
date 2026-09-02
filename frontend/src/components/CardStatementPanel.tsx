@@ -53,6 +53,33 @@ interface MelhorDia {
   extraDaysIfWait: number;
 }
 
+/**
+ * Categorias oferecidas na conferência.
+ *
+ * São as mesmas do escopo do projeto e as que a classificação automática usa —
+ * se a lista daqui divergir, o usuário escolhe uma categoria que nenhum
+ * relatório agrupa.
+ */
+const CATEGORIAS = [
+  'Moradia',
+  'Alimentação',
+  'Supermercado',
+  'Transporte',
+  'Combustível',
+  'Saúde',
+  'Educação',
+  'Lazer',
+  'Compras',
+  'Assinaturas',
+  'Viagem',
+  'Pets',
+  'Impostos',
+  'Seguros',
+  'Investimentos',
+  'Dívidas',
+  'Outros',
+];
+
 interface LancamentoLido {
   transactionId: string;
   date: string;
@@ -95,6 +122,10 @@ export function CardStatementPanel({ cardId }: { cardId: string }) {
   const [lidos, setLidos] = useState<LancamentoLido[]>([]);
   const [importando, setImportando] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  /** Categorias trocadas na conferência: transactionId → categoria. */
+  const [categorias, setCategorias] = useState<Record<string, string>>({});
+  /** Erro da importação, mostrado ao lado do botão e não no topo do painel. */
+  const [erroDaImportacao, setErroDaImportacao] = useState<string | null>(null);
 
   /**
    * Carrega os três blocos de forma INDEPENDENTE.
@@ -194,11 +225,25 @@ export function CardStatementPanel({ cardId }: { cardId: string }) {
   };
 
   const handleConfirmarImportacao = async () => {
-    if (!importId) return;
+    if (!importId) {
+      // Antes isto era um `return` mudo: quando a importação se perdia, o botão
+      // simplesmente não fazia nada e o usuário não tinha como saber por quê.
+      setErroDaImportacao(
+        'A importação se perdeu. Envie o PDF novamente antes de gravar.',
+      );
+      return;
+    }
 
     setImportando(true);
+    setErroDaImportacao(null);
     try {
-      const resultado = await apiClient.confirmPdfImport(importId);
+      // Só viaja o que o usuário realmente mudou.
+      const ajustes = Object.entries(categorias).map(
+        ([transactionId, category]) => ({ transactionId, category }),
+      );
+
+      const resultado = await apiClient.confirmPdfImport(importId, { ajustes });
+
       setFeedback(
         `${resultado?.imported ?? 0} lançamento(s) gravado(s); ${
           resultado?.skipped ?? 0
@@ -206,9 +251,14 @@ export function CardStatementPanel({ cardId }: { cardId: string }) {
       );
       setImportId(null);
       setLidos([]);
+      setCategorias({});
       await carregar();
     } catch (err) {
-      setErro(getApiErrorMessage(err, 'Não foi possível gravar os lançamentos.'));
+      // O erro aparece JUNTO DO BOTÃO. No topo do painel, depois de uma tabela
+      // de 30 linhas, ele ficava fora da tela e o clique parecia não fazer nada.
+      setErroDaImportacao(
+        getApiErrorMessage(err, 'Não foi possível gravar os lançamentos.'),
+      );
     } finally {
       setImportando(false);
     }
@@ -422,9 +472,16 @@ export function CardStatementPanel({ cardId }: { cardId: string }) {
 
         {lidos.length > 0 && (
           <div className="mt-3">
-            <p className="text-xs font-medium text-gray-900 dark:text-white mb-2">
+            <p className="text-xs font-medium text-gray-900 dark:text-white mb-1">
               {lidos.length} lançamento(s) encontrado(s) — confira antes de
               gravar:
+            </p>
+            <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">
+              A categoria pode ser trocada em qualquer linha. As de{' '}
+              <span className="text-amber-700 dark:text-amber-300">
+                borda âmbar
+              </span>{' '}
+              não foram reconhecidas automaticamente e entrariam como “Outros”.
             </p>
             <div className="max-h-56 overflow-y-auto rounded border border-gray-200 dark:border-gray-700">
               <table className="w-full text-xs">
@@ -437,28 +494,71 @@ export function CardStatementPanel({ cardId }: { cardId: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {lidos.map(item => (
-                    <tr
-                      key={item.transactionId}
-                      className="border-t border-gray-200 dark:border-gray-700"
-                    >
-                      <td className="p-2 whitespace-nowrap">
-                        {formatDateBR(item.date)}
-                      </td>
-                      <td className="p-2">{item.description}</td>
-                      <td className="p-2 text-gray-600 dark:text-gray-400">
-                        {item.suggestedCategory || 'Outros'}
-                      </td>
-                      <td className="p-2 text-right whitespace-nowrap">
-                        {formatBRL(Number(item.amount))}
-                      </td>
-                    </tr>
-                  ))}
+                  {lidos.map(item => {
+                    const atual =
+                      categorias[item.transactionId] ??
+                      item.suggestedCategory ??
+                      'Outros';
+                    const foiSugerida = Boolean(item.suggestedCategory);
+                    const foiEditada =
+                      categorias[item.transactionId] !== undefined;
+
+                    return (
+                      <tr
+                        key={item.transactionId}
+                        className="border-t border-gray-200 dark:border-gray-700"
+                      >
+                        <td className="p-2 whitespace-nowrap align-middle">
+                          {formatDateBR(item.date)}
+                        </td>
+                        <td className="p-2 align-middle">{item.description}</td>
+                        <td className="p-2 align-middle">
+                          {/* Editável na conferência: o palpite automático acerta
+                              a maioria, mas quem decide é quem fez a compra. */}
+                          <select
+                            value={atual}
+                            onChange={e =>
+                              setCategorias(anterior => ({
+                                ...anterior,
+                                [item.transactionId]: e.target.value,
+                              }))
+                            }
+                            aria-label={`Categoria de ${item.description}`}
+                            className={`w-full rounded border px-1.5 py-1 text-xs bg-white dark:bg-gray-900 ${
+                              foiEditada
+                                ? 'border-indigo-500 text-indigo-700 dark:text-indigo-300 font-medium'
+                                : foiSugerida
+                                  ? 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300'
+                                  : 'border-amber-400 text-amber-800 dark:text-amber-300'
+                            }`}
+                          >
+                            {CATEGORIAS.map(c => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="p-2 text-right whitespace-nowrap align-middle">
+                          {formatBRL(Number(item.amount))}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
-            <div className="flex flex-wrap gap-2 mt-2">
+            {erroDaImportacao && (
+              <p
+                role="alert"
+                className="mt-2 rounded bg-red-50 dark:bg-red-950/30 p-2 text-xs text-red-800 dark:text-red-200"
+              >
+                {erroDaImportacao}
+              </p>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2 mt-2">
               <button
                 onClick={handleConfirmarImportacao}
                 disabled={importando}
@@ -470,6 +570,8 @@ export function CardStatementPanel({ cardId }: { cardId: string }) {
                 onClick={() => {
                   setImportId(null);
                   setLidos([]);
+                  setCategorias({});
+                  setErroDaImportacao(null);
                 }}
                 className="px-3 py-1.5 rounded text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
               >

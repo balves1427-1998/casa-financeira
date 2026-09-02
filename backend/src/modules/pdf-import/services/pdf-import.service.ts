@@ -170,8 +170,29 @@ export class PdfImportService {
   async confirmImport(
     id: string,
     user: User,
-    selectedTransactionIds?: string[],
+    opcoes: {
+      selectedTransactionIds?: string[];
+      ajustes?: Array<{
+        transactionId: string;
+        category?: string;
+        responsible?: string;
+      }>;
+      responsible?: string;
+    } = {},
   ): Promise<{ imported: number; skipped: number; errors: any[] }> {
+    const { selectedTransactionIds, ajustes, responsible } = opcoes;
+
+    // Correções feitas na conferência, indexadas para consulta direta.
+    const ajustePor = new Map((ajustes ?? []).map((a) => [a.transactionId, a]));
+
+    // Responsável padrão: quem está importando. Antes era o literal 'bruno' —
+    // toda fatura importada pela Giovanna era lançada no nome do Bruno, e o
+    // painel de divisão ficava errado sem ninguém perceber.
+    const responsavelPadrao =
+      responsible?.trim() ||
+      (user.name || '').trim().split(/\s+/)[0].toLowerCase() ||
+      'bruno';
+
     const pdfImport = await this.getImportStatus(id, user);
 
     if (!['pending_review', 'reviewing'].includes(pdfImport.status)) {
@@ -216,6 +237,10 @@ export class PdfImportService {
           continue;
         }
 
+        // A correção da conferência tem precedência sobre o palpite da IA:
+        // foi o usuário quem olhou o lançamento.
+        const ajuste = ajustePor.get(tx.transactionId);
+
         // Create expense
         const expense = this.expensesRepository.create({
           userId: user.id,
@@ -223,9 +248,9 @@ export class PdfImportService {
           description: tx.description,
           establishment: tx.establishment,
           amount: tx.amount,
-          category: tx.suggestedCategory || 'Outros',
-          subcategory: tx.suggestedSubcategory,
-          responsible: 'bruno', // Default, should be user-selectable
+          category: ajuste?.category || tx.suggestedCategory || 'Outros',
+          subcategory: ajuste?.category ? undefined : tx.suggestedSubcategory,
+          responsible: ajuste?.responsible || responsavelPadrao,
           paymentMethod: 'credit',
           // Sem o cartão, a compra importada não conta no limite utilizado —
           // a fatura entrava e o cartão continuava "zerado".

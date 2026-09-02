@@ -1,4 +1,12 @@
-import { IsString, IsOptional, IsEnum, IsArray, IsUUID } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsArray,
+  IsUUID,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class UploadPdfDto {
   @IsString()
@@ -33,16 +41,50 @@ export class ReviewPdfImportDto {
   notes?: string; // User notes about the import
 }
 
-export class ImportConfirmationDto {
+/** Correção que o usuário faz na tela de conferência, antes de gravar. */
+export class AjusteLancamentoDto {
   @IsString()
-  importId: string;
-
-  @IsEnum(['confirm', 'reject', 'review_later'])
-  action: string;
+  transactionId: string;
 
   @IsOptional()
+  @IsString()
+  category?: string;
+
+  @IsOptional()
+  @IsString()
+  responsible?: string;
+}
+
+/**
+ * Corpo do `PUT /pdf-import/:id/confirm`.
+ *
+ * A versão anterior exigia `importId` — que já vem na URL — e um `action`
+ * declarado com `@IsEnum(['confirm', ...])`. `IsEnum` espera um objeto enum, e
+ * não um array: com array ele nunca aceita valor nenhum e a mensagem de erro
+ * sai literalmente como "action must be one of the following values: ", com a
+ * lista vazia.
+ *
+ * O efeito prático: TODA confirmação de importação respondia 400 e nada era
+ * gravado. A rota nunca funcionou desde que existe.
+ */
+export class ImportConfirmationDto {
+  /** Sem isto, grava todos os lançamentos lidos. */
+  @IsOptional()
   @IsArray()
-  selectedTransactionIds?: string[]; // If partial import
+  @IsString({ each: true })
+  selectedTransactionIds?: string[];
+
+  /** Categoria e responsável corrigidos na conferência. */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AjusteLancamentoDto)
+  ajustes?: AjusteLancamentoDto[];
+
+  /** Responsável por toda a fatura, quando o usuário não ajusta linha a linha. */
+  @IsOptional()
+  @IsString()
+  responsible?: string;
 }
 
 export class ExtractedTransactionDto {

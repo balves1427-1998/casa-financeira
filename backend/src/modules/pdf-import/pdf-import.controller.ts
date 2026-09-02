@@ -79,7 +79,7 @@ export class PdfImportController {
     @Req() req: any,
     @Body() dto: ImportConfirmationDto,
   ) {
-    return this.pdfImportService.confirmImport(id, req.user, dto.selectedTransactionIds);
+    return this.pdfImportService.confirmImport(id, req.user, dto);
   }
 
   @Put(':id/reject')
