@@ -31,7 +31,7 @@ function hojeISO(): string {
  * de propósito: o saldo dele é dívida, não dinheiro disponível.
  */
 export function ContasDoMes() {
-  const { accounts } = useAccounts();
+  const { totalBalance } = useAccounts();
   const { planned, markAsPaid, isSaving } = usePlannedAccounts();
   const { expenses, setExpensePaid } = useExpenses();
   const [pagando, setPagando] = useState<string | null>(null);
@@ -42,13 +42,19 @@ export function ContasDoMes() {
   const mes = hoje.getMonth();
   const ano = hoje.getFullYear();
 
-  const saldoEmCaixa = useMemo(
-    () =>
-      accounts
-        .filter(c => c.type !== 'credit_card')
-        .reduce((soma, c) => soma + Number(c.balance || 0), 0),
-    [accounts],
-  );
+  /**
+   * O saldo vem PRONTO do servidor, e não da soma das contas aqui.
+   *
+   * Somar `account.balance` no navegador dava um número diferente do que a aba
+   * Contas mostrava — observado na base real: R$ 24.881,14 aqui contra
+   * R$ 21.929,51 lá. A diferença eram os lançamentos que não apontam para
+   * conta nenhuma: eles saíram do caixa da casa, mas não podem ser debitados
+   * de uma conta que não indicam, então somem de uma soma feita conta a conta.
+   *
+   * Duas telas com dois saldos é pior do que qualquer um dos dois números:
+   * quem vê não sabe em qual acreditar. O servidor é a única fonte.
+   */
+  const saldoEmCaixa = totalBalance;
 
   /**
    * Tudo que vence neste mês e ainda não foi pago.

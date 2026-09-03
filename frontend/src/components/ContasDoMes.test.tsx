@@ -5,12 +5,12 @@ import { ContasDoMes } from './ContasDoMes';
 const markAsPaid = jest.fn();
 const setExpensePaid = jest.fn();
 
-let contas: any[] = [];
+let saldoDoServidor = 0;
 let planejadas: any[] = [];
 let despesas: any[] = [];
 
 jest.mock('@/hooks/useAccounts', () => ({
-  useAccounts: () => ({ accounts: contas }),
+  useAccounts: () => ({ totalBalance: saldoDoServidor }),
 }));
 
 jest.mock('@/hooks/useExpenses', () => ({
@@ -41,11 +41,9 @@ describe('ContasDoMes', () => {
     markAsPaid.mockClear().mockResolvedValue(undefined);
     setExpensePaid.mockClear().mockResolvedValue(undefined);
     despesas = [];
-    contas = [
-      { id: 'c1', type: 'checking', balance: 1000 },
-      // Cartão é dívida, não dinheiro disponível: não pode entrar no caixa.
-      { id: 'c2', type: 'credit_card', balance: 5000 },
-    ];
+    // O saldo vem pronto do servidor — já sem cartão e já contando os
+    // lançamentos que não apontam para conta nenhuma.
+    saldoDoServidor = 1000;
     planejadas = [
       {
         id: 'p1',
@@ -58,7 +56,10 @@ describe('ContasDoMes', () => {
     ];
   });
 
-  it('mostra o saldo em caixa sem somar o cartão', () => {
+  it('mostra o saldo que o servidor calculou, sem refazer a conta', () => {
+    // Somar `account.balance` aqui dava um numero diferente do da aba Contas:
+    // na base real, R$ 24.881,14 contra R$ 21.929,51. Duas telas com dois
+    // saldos e pior que qualquer um dos dois.
     render(<ContasDoMes />);
     expect(screen.getByText('R$ 1.000,00')).toBeInTheDocument();
   });
