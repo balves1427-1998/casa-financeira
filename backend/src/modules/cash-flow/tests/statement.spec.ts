@@ -20,7 +20,16 @@ describe('CashFlowService — extrato', () => {
   }) => {
     const service = new CashFlowService(
       { findOne: async () => null } as any, // snapshots
-      { find: async () => dados.despesas ?? [] } as any,
+      {
+        find: async () => dados.despesas ?? [],
+        // O extrato passou a buscar pela data do PAGAMENTO, com COALESCE — o
+        // que exige query builder em vez de `find`.
+        createQueryBuilder: () => ({
+          where: () => ({
+            andWhere: () => ({ getMany: async () => dados.despesas ?? [] }),
+          }),
+        }),
+      } as any,
       { find: async () => dados.receitas ?? [] } as any,
       { find: async () => dados.planejadas ?? [] } as any,
       {} as any, // cartões
@@ -46,6 +55,8 @@ describe('CashFlowService — extrato', () => {
     category: 'Supermercado',
     responsible: 'bruno',
     paymentMethod: 'debit',
+    // Extrato é o que aconteceu: só despesa PAGA saiu da conta.
+    isPaid: true,
     ...extra,
   });
 
@@ -169,6 +180,42 @@ describe('CashFlowService — extrato', () => {
 
     expect(e.movimentos).toHaveLength(1);
     expect(e.closingBalance).toBe(3200);
+  });
+
+  it('despesa ainda NÃO paga fica de fora — é compromisso, não saída', async () => {
+    // Era o defeito que fazia o saldo do topo não bater com o do banco: uma
+    // conta cadastrada com antecedência descontava dinheiro que continuava lá.
+    const service = criar({
+      saldo: 1000,
+      despesas: [
+        despesa(),
+        despesa({ description: 'Luz de setembro', amount: 415.94, isPaid: false }),
+      ],
+    });
+
+    const e = await service.getStatement(usuario, 8, 2026);
+
+    const descricoes = e.movimentos.map((m) => m.descricao);
+    expect(descricoes).toContain('Mercado');
+    expect(descricoes).not.toContain('Luz de setembro');
+    expect(e.closingBalance).toBe(800);
+  });
+
+  it('a despesa sai na data do PAGAMENTO, não na do lançamento', async () => {
+    const service = criar({
+      saldo: 1000,
+      despesas: [
+        despesa({
+          date: new Date('2026-08-10T12:00:00'),
+          // Pagou com atraso, no dia 20.
+          paidAt: new Date('2026-08-20T12:00:00'),
+        }),
+      ],
+    });
+
+    const e = await service.getStatement(usuario, 8, 2026);
+
+    expect(e.movimentos[0].date.getDate()).toBe(20);
   });
 
   it('recusa competência inválida', async () => {

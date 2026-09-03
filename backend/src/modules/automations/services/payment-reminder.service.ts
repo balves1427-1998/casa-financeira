@@ -9,6 +9,7 @@ import {
 } from '../entities/payment-reminder.entity';
 import { PlannedAccount } from '../../planned-accounts/entities/planned-account.entity';
 import { User } from '../../users/entities/user.entity';
+import { Expense } from '../../expenses/entities/expense.entity';
 import { EmailService } from './email.service';
 import { AlertService } from './alert.service';
 import { EmailType } from '../entities/email-log.entity';
@@ -73,6 +74,26 @@ export interface ResultadoDoDisparo {
  * `payment_reminders` com índice único por (conta, dia, janela): chamar duas
  * vezes não manda duas vezes.
  */
+/**
+ * Um compromisso a pagar, venha ele de onde vier.
+ *
+ * O lembrete não deveria se importar se a conta está no Planejado ou se é uma
+ * despesa ainda não paga — para quem recebe o e-mail, é a mesma coisa: algo
+ * vence e precisa ser pago. Esta forma comum existe para o disparo tratar os
+ * dois lados com o mesmo código, em vez de duplicar a lógica de janela, de
+ * destinatário e de registro por causa da tabela em que a linha mora.
+ */
+interface Compromisso {
+  id: string;
+  origem: 'planejado' | 'despesa';
+  userId: string;
+  description: string;
+  amount: number;
+  vencimento: Date;
+  responsible?: string;
+  category?: string;
+}
+
 @Injectable()
 export class PaymentReminderService {
   private readonly logger = new Logger(PaymentReminderService.name);
@@ -82,6 +103,8 @@ export class PaymentReminderService {
     private readonly reminderRepository: Repository<PaymentReminder>,
     @InjectRepository(PlannedAccount)
     private readonly plannedRepository: Repository<PlannedAccount>,
+    @InjectRepository(Expense)
+    private readonly expenseRepository: Repository<Expense>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly emailService: EmailService,
@@ -155,16 +178,17 @@ export class PaymentReminderService {
 
     // Registros desta janela, numa consulta só — evita uma ida ao banco por
     // conta quando a casa tem muitas contas em aberto.
+    // Dois ids possíveis para a mesma chave: a busca cobre os dois lados.
+    const ids = contas.map((c) => c.id);
     const registros = await this.reminderRepository.find({
-      where: {
-        plannedAccountId: In(contas.map((c) => c.id)),
-        referenceDate,
-        window: janela,
-      },
+      where: [
+        { plannedAccountId: In(ids), referenceDate, window: janela },
+        { expenseId: In(ids), referenceDate, window: janela },
+      ],
     });
 
     const registroPorConta = new Map(
-      registros.map((r) => [r.plannedAccountId, r]),
+      registros.map((r) => [r.plannedAccountId ?? r.expenseId, r]),
     );
 
     for (const conta of contas) {
@@ -206,7 +230,7 @@ export class PaymentReminderService {
    */
   private async buscarContasQueMerecemAviso(
     hoje: Date,
-  ): Promise<PlannedAccount[]> {
+  ): Promise<Compromisso[]> {
     const limiteFuturo = new Date(hoje);
     limiteFuturo.setDate(limiteFuturo.getDate() + DIAS_DE_ANTECEDENCIA);
     limiteFuturo.setHours(23, 59, 59, 999);
@@ -214,7 +238,7 @@ export class PaymentReminderService {
     const limitePassado = new Date(hoje);
     limitePassado.setDate(limitePassado.getDate() - DIAS_MAXIMOS_EM_ATRASO);
 
-    return this.plannedRepository
+    const planejadas = await this.plannedRepository
       .createQueryBuilder('planned')
       // Entradas previstas (salário) não são cobrança: ninguém precisa de
       // lembrete para receber dinheiro.
@@ -225,8 +249,83 @@ export class PaymentReminderService {
         inicio: limitePassado,
         fim: limiteFuturo,
       })
-      .orderBy('planned.dueDate', 'ASC')
       .getMany();
+
+    const despesas = await this.buscarDespesasNaoPagas(
+      limitePassado,
+      limiteFuturo,
+    );
+
+    return [
+      ...planejadas.map((p) => this.deConta(p)),
+      ...despesas.map((d) => this.deDespesa(d)),
+    ].sort((a, b) => a.vencimento.getTime() - b.vencimento.getTime());
+  }
+
+  /**
+   * Despesas que ainda não foram pagas e vencem na janela.
+   *
+   * POR QUE ELAS PRECISAM ESTAR AQUI
+   * --------------------------------
+   * A primeira ocorrência de uma despesa recorrente NÃO vira conta planejada:
+   * a projeção da série começa na ocorrência seguinte à data de origem. Quem
+   * cadastra "Luz, todo dia 28" no dia 3 fica com o vencimento do próprio mês
+   * apenas em `expenses`, e o disparo — que só olhava o Planejado — passava por
+   * cima dele. Numa base real isso foram catorze contas do mês inteiro sem um
+   * único aviso.
+   *
+   * A correção é avisar sobre a despesa ONDE ELA JÁ ESTÁ. Criar uma conta
+   * planejada equivalente resolveria o aviso e criaria um problema maior: o
+   * mesmo compromisso apareceria duas vezes em "a pagar no mês".
+   *
+   * Compra no cartão fica de fora: ela não vence sozinha, vence dentro da
+   * fatura — e a fatura é uma conta planejada, que já entra pelo outro lado.
+   */
+  private async buscarDespesasNaoPagas(
+    inicio: Date,
+    fim: Date,
+  ): Promise<Expense[]> {
+    return this.expenseRepository
+      .createQueryBuilder('expense')
+      .where('expense.isPaid = false')
+      .andWhere(
+        "NOT (expense.paymentMethod = 'credit' AND expense.creditCardId IS NOT NULL)",
+      )
+      // `dueDate` é a data em que o dinheiro sai; nas despesas antigas ela foi
+      // preenchida com a própria data do lançamento pela migration 031.
+      .andWhere('COALESCE(expense.dueDate, expense.date) BETWEEN :inicio AND :fim', {
+        inicio,
+        fim,
+      })
+      .getMany();
+  }
+
+  /** Conta planejada vista como compromisso. */
+  private deConta(conta: PlannedAccount): Compromisso {
+    return {
+      id: conta.id,
+      origem: 'planejado',
+      userId: conta.userId,
+      description: conta.description,
+      amount: Number(conta.amount),
+      vencimento: conta.dueDate,
+      responsible: conta.responsible,
+      category: conta.category,
+    };
+  }
+
+  /** Despesa não paga vista como compromisso. */
+  private deDespesa(despesa: Expense): Compromisso {
+    return {
+      id: despesa.id,
+      origem: 'despesa',
+      userId: despesa.userId,
+      description: despesa.description,
+      amount: Number(despesa.amount),
+      vencimento: despesa.dueDate ?? despesa.date,
+      responsible: despesa.responsible,
+      category: despesa.category,
+    };
   }
 
   /**
@@ -238,13 +337,13 @@ export class PaymentReminderService {
    * para os dois enviarem.
    */
   private async avisarSobre(
-    conta: PlannedAccount,
+    conta: Compromisso,
     hoje: Date,
     janela: JanelaLembrete,
     referenceDate: string,
     registroAnterior?: PaymentReminder,
   ): Promise<boolean> {
-    const diasAteVencer = this.diasEntre(hoje, this.soData(conta.dueDate));
+    const diasAteVencer = this.diasEntre(hoje, this.soData(conta.vencimento));
     const emAtraso = diasAteVencer < 0;
     const kind: TipoLembrete = emAtraso ? 'overdue' : 'upcoming';
 
@@ -264,7 +363,10 @@ export class PaymentReminderService {
       try {
         registro = await this.reminderRepository.save(
           this.reminderRepository.create({
-            plannedAccountId: conta.id,
+            // Exatamente um dos dois: é o que os índices únicos parciais da
+            // migration 032 protegem contra disparo duplicado.
+            plannedAccountId: conta.origem === 'planejado' ? conta.id : null,
+            expenseId: conta.origem === 'despesa' ? conta.id : null,
             userId: destinatario?.id ?? conta.userId,
             recipient: destinatario?.email ?? '',
             referenceDate,
@@ -312,7 +414,8 @@ export class PaymentReminderService {
           emAtraso,
         ),
         relatedEntityId: conta.id,
-        relatedEntityType: 'planned_account',
+        relatedEntityType:
+          conta.origem === 'planejado' ? 'planned_account' : 'expense',
       });
 
       registro.emailSent = true;
@@ -336,7 +439,7 @@ export class PaymentReminderService {
    * vai para quem cadastrou — melhor chegar a alguém da casa do que a ninguém.
    */
   private async resolverDestinatario(
-    conta: PlannedAccount,
+    conta: Compromisso,
   ): Promise<User | null> {
     const criador = await this.userRepository.findOne({
       where: { id: conta.userId },
@@ -369,7 +472,7 @@ export class PaymentReminderService {
 
   /** Alerta dentro da aplicação, que não depende de e-mail nenhum. */
   private async registrarAlerta(
-    conta: PlannedAccount,
+    conta: Compromisso,
     destinatario: User | null,
     diasAteVencer: number,
     emAtraso: boolean,
@@ -409,6 +512,7 @@ export class PaymentReminderService {
     janelas: string[];
     ultimosEnvios: Array<{
       conta: string;
+      origem: string;
       destinatario: string;
       quando: Date;
       janela: string;
@@ -428,7 +532,10 @@ export class PaymentReminderService {
       disparoExternoConfigurado: Boolean(process.env.REMINDER_DISPATCH_TOKEN),
       janelas: ['10:00 (America/Sao_Paulo)', '19:00 (America/Sao_Paulo)'],
       ultimosEnvios: ultimos.map((r) => ({
-        conta: r.plannedAccountId,
+        // O aviso pode ter vindo de uma conta planejada ou de uma despesa
+        // ainda não paga; para quem lê o status, o que importa é qual foi.
+        conta: r.plannedAccountId ?? r.expenseId ?? '',
+        origem: r.plannedAccountId ? 'planejado' : 'despesa',
         destinatario: r.recipient,
         quando: r.createdAt,
         janela: r.window,
@@ -442,7 +549,7 @@ export class PaymentReminderService {
   // ==================== textos ====================
 
   private montarAssunto(
-    conta: PlannedAccount,
+    conta: Compromisso,
     diasAteVencer: number,
     emAtraso: boolean,
   ): string {
@@ -461,12 +568,12 @@ export class PaymentReminderService {
   }
 
   private montarMensagem(
-    conta: PlannedAccount,
+    conta: Compromisso,
     diasAteVencer: number,
     emAtraso: boolean,
   ): string {
     const valor = this.formatarMoeda(Number(conta.amount));
-    const vencimento = this.formatarData(conta.dueDate);
+    const vencimento = this.formatarData(conta.vencimento);
 
     if (emAtraso) {
       const dias = Math.abs(diasAteVencer);
@@ -483,7 +590,7 @@ export class PaymentReminderService {
   }
 
   private montarDados(
-    conta: PlannedAccount,
+    conta: Compromisso,
     destinatario: User,
     diasAteVencer: number,
     emAtraso: boolean,
@@ -496,7 +603,7 @@ export class PaymentReminderService {
       nomeResponsavel: (destinatario.name ?? '').split(/\s+/)[0],
       descricao: conta.description,
       valor: this.formatarMoeda(Number(conta.amount)),
-      vencimento: this.formatarData(conta.dueDate),
+      vencimento: this.formatarData(conta.vencimento),
       categoria: conta.category ?? null,
       responsavel: this.capitalizar(conta.responsible ?? ''),
 

@@ -48,6 +48,7 @@ describe('SaldoService', () => {
           amount: '200.00',
           date: new Date('2026-08-10'),
           paymentMethod: 'debit',
+          isPaid: true,
         },
       ],
     });
@@ -128,6 +129,7 @@ describe('SaldoService', () => {
           amount: '200.00',
           date: new Date('2026-09-03'),
           paymentMethod: 'debit',
+          isPaid: true,
         },
       ],
     });
@@ -149,6 +151,7 @@ describe('SaldoService', () => {
           amount: '300.00',
           date: new Date('2026-08-10'),
           paymentMethod: 'debit',
+          isPaid: true,
         },
       ],
     });
@@ -159,6 +162,50 @@ describe('SaldoService', () => {
     expect(saldo.saldo).toBe(700);
     // A conta em si não foi afetada: o lançamento não aponta para ela.
     expect(saldo.porConta[0].saldo).toBe(1000);
+  });
+
+  it('despesa NÃO PAGA não desconta — é compromisso, não saída', async () => {
+    // O defeito que isto trava, medido numa base real: R$ 21.090,54 em contas
+    // ainda não pagas sendo descontados de um saldo de R$ 838,97. O sistema já
+    // sabia a diferença ao criar o lançamento; só o saldo é que a ignorava.
+    const service = criar({
+      contas: [conta()],
+      despesas: [
+        {
+          accountId: 'conta-1',
+          amount: '415.94',
+          date: new Date('2026-09-28'),
+          paymentMethod: 'debit',
+          isPaid: false,
+        },
+      ],
+    });
+
+    expect((await service.getSaldo(usuario)).saldo).toBe(1000);
+  });
+
+  it('a despesa sai na data em que foi PAGA', async () => {
+    const service = criar({
+      contas: [conta()],
+      despesas: [
+        {
+          accountId: 'conta-1',
+          amount: '200.00',
+          date: new Date('2026-08-28'),
+          // Pagou só em setembro: em agosto o dinheiro ainda estava lá.
+          paidAt: new Date('2026-09-02'),
+          paymentMethod: 'debit',
+          isPaid: true,
+        },
+      ],
+    });
+
+    const fimDeAgosto = await service.getSaldoDeAbertura(
+      usuario,
+      new Date(2026, 8, 1),
+    );
+    expect(fimDeAgosto).toBe(1000);
+    expect((await service.getSaldo(usuario)).saldo).toBe(800);
   });
 
   it('soma as contas da casa inteira, não só as de quem consultou', async () => {

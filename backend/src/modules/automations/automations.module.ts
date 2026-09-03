@@ -8,6 +8,7 @@ import { Webhook } from './entities/webhook.entity';
 import { WebhookDelivery } from './entities/webhook-delivery.entity';
 import { PaymentReminder } from './entities/payment-reminder.entity';
 import { PlannedAccount } from '../planned-accounts/entities/planned-account.entity';
+import { Expense } from '../expenses/entities/expense.entity';
 import { User } from '../users/entities/user.entity';
 import { ReportSchedulerService } from './services/report-scheduler.service';
 import { AlertService } from './services/alert.service';
@@ -43,10 +44,15 @@ import { PaymentReminderController } from './controllers/payment-reminder.contro
       EmailLog,
       Webhook,
       WebhookDelivery,
-      // Lembretes de vencimento: `PlannedAccount` e `User` entram pelo
-      // repositório para não importar os módulos deles aqui.
+      // Lembretes de vencimento: `PlannedAccount`, `Expense` e `User` entram
+      // pelo repositório para não importar os módulos deles aqui.
+      //
+      // `Expense` porque o aviso também cobre despesa ainda não paga: a
+      // primeira ocorrência de uma recorrente não vira conta planejada, e sem
+      // isso ela vencia em silêncio.
       PaymentReminder,
       PlannedAccount,
+      Expense,
       User,
     ]),
     ScheduleModule.forRoot(), // Necessário para @Cron decorators

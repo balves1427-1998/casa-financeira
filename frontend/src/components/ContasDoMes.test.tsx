@@ -3,12 +3,18 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ContasDoMes } from './ContasDoMes';
 
 const markAsPaid = jest.fn();
+const setExpensePaid = jest.fn();
 
 let contas: any[] = [];
 let planejadas: any[] = [];
+let despesas: any[] = [];
 
 jest.mock('@/hooks/useAccounts', () => ({
   useAccounts: () => ({ accounts: contas }),
+}));
+
+jest.mock('@/hooks/useExpenses', () => ({
+  useExpenses: () => ({ expenses: despesas, setExpensePaid }),
 }));
 
 jest.mock('@/hooks/usePlannedAccounts', () => ({
@@ -33,6 +39,8 @@ describe('ContasDoMes', () => {
 
   beforeEach(() => {
     markAsPaid.mockClear().mockResolvedValue(undefined);
+    setExpensePaid.mockClear().mockResolvedValue(undefined);
+    despesas = [];
     contas = [
       { id: 'c1', type: 'checking', balance: 1000 },
       // Cartão é dívida, não dinheiro disponível: não pode entrar no caixa.
@@ -87,5 +95,65 @@ describe('ContasDoMes', () => {
     render(<ContasDoMes />);
     // 1000 em caixa − 300 a pagar = 700.
     expect(screen.getByText('R$ 700,00')).toBeInTheDocument();
+  });
+
+  it('conta a DESPESA não paga que vence no mês', async () => {
+    // O caso real: catorze contas cadastradas como despesas recorrentes, e
+    // este painel dizendo "R$ 0,00 a pagar" porque só olhava o Planejado.
+    planejadas = [];
+    despesas = [
+      {
+        id: 'e1',
+        description: 'Luz',
+        amount: 415.94,
+        date: noMes(28),
+        dueDate: noMes(28),
+        isPaid: false,
+        paymentMethod: 'debit',
+      },
+    ];
+
+    render(<ContasDoMes />);
+
+    expect(screen.getByText('Luz')).toBeInTheDocument();
+    // Duas vezes: no total do mês e na linha da conta.
+    expect(screen.getAllByText('R$ 415,94')).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Marcar paga' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }));
+
+    // Despesa é quitada pelo seu próprio caminho, não pelo do Planejado.
+    await waitFor(() => expect(setExpensePaid).toHaveBeenCalledWith('e1', true));
+    expect(markAsPaid).not.toHaveBeenCalled();
+  });
+
+  it('despesa já paga e compra no cartão ficam de fora', () => {
+    planejadas = [];
+    despesas = [
+      {
+        id: 'e1',
+        description: 'Ja paga',
+        amount: 100,
+        date: noMes(10),
+        isPaid: true,
+        paymentMethod: 'debit',
+      },
+      {
+        id: 'e2',
+        description: 'No cartao',
+        amount: 200,
+        date: noMes(10),
+        isPaid: false,
+        paymentMethod: 'credit',
+        creditCardId: 'card-1',
+      },
+    ];
+
+    render(<ContasDoMes />);
+
+    expect(screen.queryByText('Ja paga')).not.toBeInTheDocument();
+    // A compra do cartão vence dentro da fatura, que entra pelo Planejado.
+    expect(screen.queryByText('No cartao')).not.toBeInTheDocument();
+    expect(screen.getByText('0 conta(s)')).toBeInTheDocument();
   });
 });

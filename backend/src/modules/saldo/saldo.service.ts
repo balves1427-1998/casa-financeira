@@ -52,7 +52,7 @@ export interface SaldoDaCasa {
  * telas chamam de "saldo em caixa".
  *
  *  - receita registrada: entrou;
- *  - despesa paga fora do cartão: saiu;
+ *  - despesa PAGA fora do cartão: saiu — a não paga é compromisso, não saída;
  *  - COMPRA NO CARTÃO: não move nada. O dinheiro continua na conta até a
  *    fatura ser paga;
  *  - fatura de cartão paga: sai na data do pagamento.
@@ -135,7 +135,21 @@ export class SaldoService {
     for (const d of despesas) {
       // Compra no cartão não moveu a conta. Quem move é a fatura.
       if (d.paymentMethod === 'credit' && d.creditCardId) continue;
-      if (!dentroDoCorte(d.date)) continue;
+
+      // DESPESA NÃO PAGA NÃO SAIU DO CAIXA.
+      //
+      // O sistema já sabia disso ao criar o lançamento: uma despesa à vista
+      // com data passada nasce paga, uma com data futura nasce pendente. Só o
+      // saldo é que ignorava a distinção e descontava as duas — e como um
+      // compromisso futuro é justamente o que se cadastra com antecedência,
+      // o saldo aparecia menor do que o dinheiro que existe na conta. Numa
+      // base real: R$ 21.090,54 em contas ainda não pagas descontados de um
+      // saldo de R$ 838,97.
+      if (!d.isPaid) continue;
+
+      // Sai no dia em que foi paga, não no dia do lançamento: pagar adiantado
+      // ou em atraso muda o dia em que o dinheiro deixou a conta.
+      if (!dentroDoCorte(d.paidAt ?? d.date)) continue;
       somar(d.accountId, -Number(d.amount));
     }
 

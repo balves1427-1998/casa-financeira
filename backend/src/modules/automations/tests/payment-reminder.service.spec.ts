@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { PaymentReminderService } from '../services/payment-reminder.service';
 import { PaymentReminder } from '../entities/payment-reminder.entity';
 import { PlannedAccount } from '../../planned-accounts/entities/planned-account.entity';
+import { Expense } from '../../expenses/entities/expense.entity';
 import { User } from '../../users/entities/user.entity';
 import { EmailService } from '../services/email.service';
 import { AlertService } from '../services/alert.service';
@@ -68,6 +69,7 @@ describe('PaymentReminderService', () => {
   };
 
   let plannedQb: any;
+  let despesaQb: any;
 
   const mockReminderRepository: any = {
     find: jest.fn(async () => []),
@@ -77,6 +79,12 @@ describe('PaymentReminderService', () => {
 
   const mockPlannedRepository: any = {
     createQueryBuilder: jest.fn(() => plannedQb),
+  };
+
+  // O aviso passou a cobrir também DESPESA não paga: a primeira ocorrência de
+  // uma recorrente não vira conta planejada, e sem isto ela vencia calada.
+  const mockExpenseRepository: any = {
+    createQueryBuilder: jest.fn(() => despesaQb),
   };
 
   const mockUserRepository: any = {
@@ -96,6 +104,7 @@ describe('PaymentReminderService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     plannedQb = criarQueryBuilder();
+    despesaQb = criarQueryBuilder();
     mockEmailService.smtpConfigurado = true;
     mockReminderRepository.find.mockResolvedValue([]);
 
@@ -109,6 +118,10 @@ describe('PaymentReminderService', () => {
         {
           provide: getRepositoryToken(PlannedAccount),
           useValue: mockPlannedRepository,
+        },
+        {
+          provide: getRepositoryToken(Expense),
+          useValue: mockExpenseRepository,
         },
         { provide: getRepositoryToken(User), useValue: mockUserRepository },
         { provide: EmailService, useValue: mockEmailService },

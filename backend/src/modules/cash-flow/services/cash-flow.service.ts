@@ -535,9 +535,17 @@ export class CashFlowService {
     const fim = new Date(year, month, 0, 23, 59, 59);
 
     const [despesas, receitas, planejadas] = await Promise.all([
-      this.expenseRepository.find({
-        where: { userId: In(userIds), date: Between(inicio, fim) },
-      }),
+      // A despesa entra no extrato pela data do PAGAMENTO. Buscar por `date`
+      // deixaria de fora a conta lançada em setembro e paga em outubro — que
+      // pertence a outubro — e traria a de outubro paga adiantada em setembro.
+      this.expenseRepository
+        .createQueryBuilder('expense')
+        .where('expense.userId IN (:...userIds)', { userIds })
+        .andWhere(
+          'COALESCE(expense.paidAt, expense.date) BETWEEN :inicio AND :fim',
+          { inicio, fim },
+        )
+        .getMany(),
       this.incomeRepository.find({
         where: { userId: In(userIds), date: Between(inicio, fim) },
       }),
@@ -574,8 +582,14 @@ export class CashFlowService {
       // Compra no cartão não moveu a conta. Quem move é a fatura.
       if (d.paymentMethod === 'credit' && d.creditCardId) continue;
 
+      // Extrato é o que ACONTECEU. Uma despesa ainda não paga é compromisso:
+      // mostrá-la aqui faria o saldo do topo deixar de bater com o do banco,
+      // que é exatamente o que esta tela existe para evitar.
+      if (!d.isPaid) continue;
+
       movimentos.push({
-        date: d.date,
+        // Na data do pagamento, não na do lançamento — mesma regra da fatura.
+        date: d.paidAt ?? d.date,
         tipo: 'saida',
         descricao: d.description,
         categoria: d.category,

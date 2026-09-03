@@ -3,7 +3,6 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
-  Index,
 } from 'typeorm';
 
 /** Em qual das duas janelas diárias o lembrete saiu. */
@@ -21,17 +20,33 @@ export type TipoLembrete = 'upcoming' | 'overdue';
  * aplicação dormindo). Sem este registro, uma repetição do acionador mandaria o
  * mesmo aviso de novo.
  *
- * O índice único em (conta, dia, janela) é a garantia real — a checagem no
- * código pode perder uma corrida entre dois disparos simultâneos; o banco não.
+ * O índice único em (compromisso, dia, janela) é a garantia real — a checagem
+ * no código pode perder uma corrida entre dois disparos simultâneos; o banco
+ * não.
  */
 @Entity('payment_reminders')
-@Index(['plannedAccountId', 'referenceDate', 'window'], { unique: true })
 export class PaymentReminder {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column('uuid')
-  plannedAccountId: string;
+  /**
+   * De onde veio o compromisso avisado: uma conta planejada OU uma despesa
+   * ainda não paga. Exatamente um dos dois é preenchido.
+   *
+   * A despesa entrou aqui porque a primeira ocorrência de uma recorrente não
+   * mora no Planejado — a projeção começa na ocorrência seguinte — e sem isto
+   * ela vencia sem nenhum aviso.
+   *
+   * Os índices únicos que impedem o aviso duplicado são PARCIAIS e vivem na
+   * migration 032, um por lado. Não dá para declará-los aqui: o decorador
+   * `@Index` não escreve a cláusula `WHERE`, e um índice comum sobre as duas
+   * colunas não protegeria nada — no Postgres `NULL` nunca é igual a `NULL`.
+   */
+  @Column('uuid', { nullable: true })
+  plannedAccountId?: string | null;
+
+  @Column('uuid', { nullable: true })
+  expenseId?: string | null;
 
   /** Dono da conta — quem deveria receber o aviso. */
   @Column('uuid')
