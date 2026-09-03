@@ -1,0 +1,34 @@
+# Normalização de fim de linha.
+#
+# POR QUE ESTE ARQUIVO EXISTE
+# ---------------------------
+# O repositório é editado no Windows e roda no Linux (Render, GitHub Actions).
+# Sem regra explícita, o Git do Windows converte os arquivos para CRLF ao
+# fazer checkout — e os scripts `.sh` foram parar no índice já convertidos.
+#
+# Isso quebrou um `git am` com "does not match index": o patch trazia a versão
+# em LF e o índice guardava a mesma linha em CRLF, então o Git não reconhecia
+# o texto de origem. O sintoma não diz nada sobre fim de linha, o que torna o
+# problema caro de diagnosticar toda vez que reaparece.
+#
+# Um `.sh` com CRLF também quebra na execução: o shebang vira "#!/bin/bash\r"
+# e o Linux responde "bad interpreter".
+
+# Texto é normalizado para LF no repositório; o checkout respeita a plataforma.
+* text=auto eol=lf
+
+# Scripts e arquivos que o Linux executa: LF SEMPRE, inclusive no Windows.
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Dockerfile text eol=lf
+
+# Binários não passam por conversão nenhuma.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.ico binary
+*.woff binary
+*.woff2 binary

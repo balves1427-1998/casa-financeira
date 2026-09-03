@@ -51,7 +51,7 @@ export interface SaldoDaCasa {
  * o "saldo até hoje" mostrado lá tem que ser o mesmo número que as outras
  * telas chamam de "saldo em caixa".
  *
- *  - receita registrada: entrou;
+ *  - receita registrada com data até hoje: entrou;
  *  - despesa PAGA fora do cartão: saiu — a não paga é compromisso, não saída;
  *  - COMPRA NO CARTÃO: não move nada. O dinheiro continua na conta até a
  *    fatura ser paga;
@@ -90,11 +90,19 @@ export class SaldoService {
   /**
    * Saldo da casa numa data.
    *
-   * @param ate corte inclusivo. Omitido, considera tudo que já foi lançado —
-   *   inclusive lançamentos com data futura, que é o que o usuário espera de
-   *   "saldo atual" quando adianta um pagamento.
+   * @param ate corte inclusivo. Omitido, vale HOJE — saldo em caixa é o
+   *   dinheiro que está na conta agora, não o que vai estar.
+   *
+   * A versão anterior, sem corte, somava também os lançamentos com data
+   * futura. Enquanto a despesa não paga também era descontada, os dois erros
+   * mais ou menos se cancelavam; depois que a despesa passou a esperar o
+   * pagamento, sobrou a assimetria: o salário do dia 20 contava como se já
+   * tivesse caído, e no dia 3 o saldo mostrava R$ 21.929,51 onde havia
+   * R$ 12.804,05. A mesma régua vale para os dois lados — o que ainda não
+   * aconteceu não está no caixa.
    */
   async getSaldo(user: User, ate?: Date): Promise<SaldoDaCasa> {
+    const corte = ate ?? fimDeHoje();
     const userIds = await this.scopeUserIds(user);
 
     const contas = await this.accountRepository.find({
@@ -116,8 +124,7 @@ export class SaldoService {
 
     const dentroDoCorte = (data?: Date | null): boolean => {
       if (!data) return false;
-      if (!ate) return true;
-      return new Date(data).getTime() <= ate.getTime();
+      return new Date(data).getTime() <= corte.getTime();
     };
 
     /** Movimento por conta; a chave vazia guarda o que não aponta para nenhuma. */
@@ -214,4 +221,11 @@ export class SaldoService {
 
 function arredondar(valor: number): number {
   return Number(valor.toFixed(2));
+}
+
+/** Fim do dia de hoje: o que acontece hoje já conta no saldo de hoje. */
+function fimDeHoje(): Date {
+  const d = new Date();
+  d.setHours(23, 59, 59, 999);
+  return d;
 }

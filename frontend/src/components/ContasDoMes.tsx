@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useAccounts } from '@/hooks/useAccounts';
 import { useExpenses } from '@/hooks/useExpenses';
+import { useIncome } from '@/hooks/useIncome';
 import { usePlannedAccounts } from '@/hooks/usePlannedAccounts';
 import { formatBRL, formatDateBR } from '@/utils/format';
 
@@ -34,6 +35,7 @@ export function ContasDoMes() {
   const { totalBalance } = useAccounts();
   const { planned, markAsPaid, isSaving } = usePlannedAccounts();
   const { expenses, setExpensePaid } = useExpenses();
+  const { incomes } = useIncome();
   const [pagando, setPagando] = useState<string | null>(null);
   const [confirmando, setConfirmando] = useState<string | null>(null);
   const [dataDoPagamento, setDataDoPagamento] = useState(hojeISO());
@@ -116,18 +118,40 @@ export function ContasDoMes() {
     [aPagar],
   );
 
-  const aReceber = useMemo(
-    () =>
-      planned
-        .filter(c => {
-          if (c.type !== 'income') return false;
-          if (c.status === 'paid' || c.status === 'cancelled') return false;
-          const v = new Date(c.dueDate);
-          return v.getMonth() === mes && v.getFullYear() === ano;
-        })
-        .reduce((soma, c) => soma + Number(c.amount || 0), 0),
-    [planned, mes, ano],
-  );
+  /**
+   * O que ainda vai entrar neste mês.
+   *
+   * Como o saldo em caixa passou a contar só o que JÁ entrou, a receita com
+   * data futura precisa aparecer aqui — senão o salário do dia 20 sumiria das
+   * duas contas e o mês pareceria mais apertado do que é. Vem de dois lugares,
+   * pela mesma razão que "a pagar": entrada prevista no Planejado e receita já
+   * lançada com data ainda por vir.
+   */
+  const aReceber = useMemo(() => {
+    const fimDeHoje = new Date();
+    fimDeHoje.setHours(23, 59, 59, 999);
+
+    const doMes = (data: string | Date) => {
+      const v = new Date(data);
+      return v.getMonth() === mes && v.getFullYear() === ano;
+    };
+
+    const previsto = planned
+      .filter(c => {
+        if (c.type !== 'income') return false;
+        if (c.status === 'paid' || c.status === 'cancelled') return false;
+        return doMes(c.dueDate);
+      })
+      .reduce((soma, c) => soma + Number(c.amount || 0), 0);
+
+    // Uma entrada prevista já confirmada vira receita e sai do filtro acima,
+    // então não há risco de contar o mesmo dinheiro duas vezes.
+    const lancadoParaFrente = incomes
+      .filter(r => doMes(r.date) && new Date(r.date) > fimDeHoje)
+      .reduce((soma, r) => soma + Number(r.amount || 0), 0);
+
+    return previsto + lancadoParaFrente;
+  }, [planned, incomes, mes, ano]);
 
   // O que sobra depois de pagar tudo o que vence no mês, contando o que ainda
   // está por receber. É o número que decide se dá para comprar alguma coisa.

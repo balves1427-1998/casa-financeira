@@ -208,6 +208,31 @@ describe('SaldoService', () => {
     expect((await service.getSaldo(usuario)).saldo).toBe(800);
   });
 
+  it('receita com data FUTURA não entra no saldo de hoje', async () => {
+    // A assimetria que isto fecha: depois que a despesa não paga parou de sair
+    // do caixa, a receita continuava entrando na data que estivesse escrita
+    // nela. No dia 3, o salário do dia 20 fazia o saldo mostrar R$ 21.929,51
+    // onde havia R$ 12.804,05. A mesma régua vale para os dois lados.
+    const amanha = new Date();
+    amanha.setDate(amanha.getDate() + 10);
+
+    const service = criar({
+      contas: [conta()],
+      receitas: [{ accountId: 'conta-1', amount: '8500.00', date: amanha }],
+    });
+
+    expect((await service.getSaldo(usuario)).saldo).toBe(1000);
+  });
+
+  it('receita de hoje JÁ entra — o corte é o fim do dia', async () => {
+    const serviceHoje = criar({
+      contas: [conta()],
+      receitas: [{ accountId: 'conta-1', amount: '500.00', date: new Date() }],
+    });
+
+    expect((await serviceHoje.getSaldo(usuario)).saldo).toBe(1500);
+  });
+
   it('soma as contas da casa inteira, não só as de quem consultou', async () => {
     // `getTotalBalance` filtrava por `userId` do usuário logado enquanto as
     // despesas do outro morador entravam na conta — o saldo saía otimista.

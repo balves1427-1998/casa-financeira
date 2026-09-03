@@ -8,6 +8,7 @@ const setExpensePaid = jest.fn();
 let saldoDoServidor = 0;
 let planejadas: any[] = [];
 let despesas: any[] = [];
+let receitas: any[] = [];
 
 jest.mock('@/hooks/useAccounts', () => ({
   useAccounts: () => ({ totalBalance: saldoDoServidor }),
@@ -15,6 +16,10 @@ jest.mock('@/hooks/useAccounts', () => ({
 
 jest.mock('@/hooks/useExpenses', () => ({
   useExpenses: () => ({ expenses: despesas, setExpensePaid }),
+}));
+
+jest.mock('@/hooks/useIncome', () => ({
+  useIncome: () => ({ incomes: receitas }),
 }));
 
 jest.mock('@/hooks/usePlannedAccounts', () => ({
@@ -41,6 +46,7 @@ describe('ContasDoMes', () => {
     markAsPaid.mockClear().mockResolvedValue(undefined);
     setExpensePaid.mockClear().mockResolvedValue(undefined);
     despesas = [];
+    receitas = [];
     // O saldo vem pronto do servidor — já sem cartão e já contando os
     // lançamentos que não apontam para conta nenhuma.
     saldoDoServidor = 1000;
@@ -126,6 +132,24 @@ describe('ContasDoMes', () => {
     // Despesa é quitada pelo seu próprio caminho, não pelo do Planejado.
     await waitFor(() => expect(setExpensePaid).toHaveBeenCalledWith('e1', true));
     expect(markAsPaid).not.toHaveBeenCalled();
+  });
+
+  it('receita com data futura conta em "ainda a receber"', async () => {
+    // Contrapartida do saldo passar a contar só o que já entrou: sem isto, o
+    // salário do dia 20 sumiria das duas contas e o mês pareceria apertado.
+    planejadas = [];
+    const daquiA10Dias = new Date();
+    daquiA10Dias.setDate(daquiA10Dias.getDate() + 10);
+
+    receitas = [
+      { id: 'r1', description: 'Salário', amount: 8500, date: daquiA10Dias.toISOString() },
+      // Já entrou: está no saldo, não pode ser contada de novo aqui.
+      { id: 'r2', description: 'Reembolso', amount: 300, date: noMes(1) },
+    ];
+
+    render(<ContasDoMes />);
+
+    expect(screen.getByText('R$ 8.500,00')).toBeInTheDocument();
   });
 
   it('despesa já paga e compra no cartão ficam de fora', () => {

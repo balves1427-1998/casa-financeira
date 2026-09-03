@@ -179,6 +179,40 @@ export default function PlannedPage() {
   /** O que sobra depois de pagar tudo o que está previsto. */
   const saldoPlanejado = totalAReceber - totalPending;
 
+  /**
+   * De quando até quando estes totais somam.
+   *
+   * A pergunta que a tela não respondia — e que o usuário fez: "aquele montante
+   * se refere até qual período?". A resposta não é "o mês" nem "o ano": não há
+   * filtro de data nenhum, é TUDO que está em aberto. Isso vai do compromisso
+   * mais atrasado até o fim da janela que a recorrência projeta, doze meses à
+   * frente. Um rótulo fixo dizendo "do ano" estaria errado nas duas pontas, e
+   * envelheceria; mostrar o intervalo real se explica sozinho e acompanha os
+   * dados.
+   */
+  const periodo = useMemo(() => {
+    if (emAberto.length === 0) return null;
+
+    const datas = emAberto
+      .map(p => new Date(p.dueDate).getTime())
+      .filter(t => Number.isFinite(t))
+      .sort((a, b) => a - b);
+
+    if (datas.length === 0) return null;
+
+    return {
+      inicio: new Date(datas[0]),
+      fim: new Date(datas[datas.length - 1]),
+      quantidade: emAberto.length,
+    };
+  }, [emAberto]);
+
+  const legendaDoPeriodo = periodo
+    ? `${periodo.quantidade} lançamento(s) em aberto, de ${formatDateBR(
+        periodo.inicio,
+      )} a ${formatDateBR(periodo.fim)}`
+    : 'Nenhum lançamento em aberto';
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'pending':
@@ -464,6 +498,15 @@ export default function PlannedPage() {
       </div>
 
       {/* Visão consolidada: o que entra, o que sai e o que sobra */}
+      <div>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+          Estes três totais somam <strong>tudo o que está em aberto</strong> —
+          não é o mês nem o ano fechado. Vão do compromisso mais atrasado até o
+          fim da janela que as recorrências projetam, doze meses à frente. Para
+          ver um mês só, use o Planejado × Realizado no topo.
+        </p>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="border-2 border-green-200 dark:border-green-800">
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
@@ -473,7 +516,10 @@ export default function PlannedPage() {
             {formatBRL(totalAReceber)}
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Salários e outras receitas recorrentes previstas
+            Salários e outras entradas previstas
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {legendaDoPeriodo}
           </p>
         </Card>
 
@@ -486,6 +532,9 @@ export default function PlannedPage() {
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             Contas previstas e confirmadas
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {legendaDoPeriodo}
           </p>
         </Card>
 
@@ -510,6 +559,9 @@ export default function PlannedPage() {
             {saldoPlanejado >= 0
               ? 'O que sobra depois de pagar tudo o que está previsto'
               : 'O previsto a pagar supera o previsto a receber'}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {legendaDoPeriodo}
           </p>
         </Card>
       </div>
